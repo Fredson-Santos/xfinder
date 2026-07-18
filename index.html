@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XFinder</title>
+<meta name="description" content="Buscador IPTV multi-servidor com suporte a Xtream Codes e M3U">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── HOME ──────────────────────────────────────────────────────────── -->
+  <div class="screen active" id="screen-home">
+    <div class="topline">
+      <div class="logo"><span class="dot"></span>XFinder</div>
+      <div class="topline-actions">
+        <button class="icon-btn fx" id="btnRefresh" onclick="refreshAll()" title="Sincronizar todos os servidores" aria-label="Sincronizar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+        <button class="icon-btn fx" id="btnSettings" onclick="goTo('settings')" title="Gerenciar servidores" aria-label="Configurações">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="search-zone">
+      <div class="search-label">Buscar em <span class="mono" id="serverCountLabel">0</span> servidores</div>
+      <div class="search-bar">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="searchInput" class="fx" placeholder="Nome do filme, série ou canal..." autocomplete="off">
+      </div>
+      <div class="search-hint" id="searchHint">Enter para buscar · ESC para limpar</div>
+    </div>
+
+    <!-- scan progress -->
+    <div class="scan-list" id="scanList"></div>
+
+    <!-- results -->
+    <div class="results-head" id="resultsHead" style="display:none">
+      <span class="mono count" id="resultsCount"></span>
+    </div>
+    <div id="resultsList"></div>
+
+    <div class="empty-state" id="emptyState" style="display:none">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <p>Nenhum resultado encontrado.</p>
+    </div>
+
+    <div class="no-servers-state" id="noServersState" style="display:none">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+      <p>Nenhum servidor adicionado ainda.</p>
+      <button class="accent-btn" onclick="goTo('settings')">Adicionar servidor</button>
+    </div>
+  </div>
+
+  <!-- ── SERIES ────────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-series">
+    <button class="back-btn fx" onclick="goBack()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+    <div id="seriesContent"></div>
+  </div>
+
+  <!-- ── DETAIL (filme / live / episódio) ──────────────────────────────── -->
+  <div class="screen" id="screen-detail">
+    <button class="back-btn fx" onclick="goBack()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+    <div id="mediaContent"></div>
+  </div>
+
+  <!-- ── SETTINGS ──────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-settings">
+    <button class="back-btn fx" onclick="goBack()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+
+    <div class="settings-title">Servidores</div>
+    <div id="serversManageList"></div>
+
+    <div class="add-form-title">Adicionar servidor</div>
+    <div class="mode-tabs">
+      <button class="mode-tab fx active" id="tabXtream" onclick="setAddMode('xtream')">Xtream API</button>
+      <button class="mode-tab fx" id="tabM3u" onclick="setAddMode('m3u')">Lista M3U</button>
+    </div>
+
+    <!-- Xtream fields -->
+    <div class="add-server-fields active" id="fieldsXtream">
+      <input type="text"     id="xName" class="fx" placeholder="Nome (ex: Servidor Principal)">
+      <input type="text"     id="xHost" class="fx" placeholder="Host / IP">
+      <input type="text"     id="xPort" class="fx" placeholder="Porta">
+      <input type="text"     id="xUser" class="fx" placeholder="Usuário">
+      <input type="password" id="xPass" class="fx" placeholder="Senha">
+      <button class="add-server-btn fx" id="btnAddXtream" onclick="addServer('xtream')">+ Adicionar e sincronizar</button>
+    </div>
+
+    <!-- M3U fields -->
+    <div class="add-server-fields" id="fieldsM3u">
+      <input type="text" id="mName" class="fx" placeholder="Nome (ex: Lista do provedor X)">
+      <input type="text" id="mUrl"  class="fx" placeholder="http://provedor.com/lista.m3u?user=...&pass=...">
+      <div class="field-hint">Cole o link completo da lista M3U/M3U8.</div>
+      <button class="add-server-btn fx" id="btnAddM3u" onclick="addServer('m3u')">+ Adicionar e sincronizar</button>
+    </div>
+  </div>
+
+</div><!-- /.app -->
+
+<script src="js/app.js"></script>
+</body>
+</html>

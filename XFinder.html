@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamFind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0B0D;
+    --panel: #131519;
+    --panel-2: #1A1D22;
+    --border: rgba(255,255,255,0.09);
+    --border-strong: rgba(255,255,255,0.16);
+    --text: #E9EAEC;
+    --text-dim: #7C8189;
+    --text-faint: #52565D;
+    --accent: #29D398;
+    --accent-dim: #12523E;
+    --warn: #E0A73C;
+    --danger: #E0665C;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+
+  button, input { font-family: inherit; }
+  button { appearance: none; -webkit-appearance: none; background: none; border: none; color: inherit; cursor: pointer; text-align: left; }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .app {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 20px 40px;
+  }
+
+  /* Focus — the primary interaction signal in this interface */
+  .fx { border-radius: 10px; transition: box-shadow .12s ease, background .12s ease, transform .12s ease; }
+  .fx:focus {
+    outline: none;
+    background: var(--panel-2);
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    transform: scale(1.015);
+  }
+  .fx:focus-visible { z-index: 2; position: relative; }
+
+  .topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 40px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .2px;
+  }
+
+  .logo .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+
+  .gear-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+  }
+
+  .refresh-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 9px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    transition: color .2s ease;
+  }
+  .refresh-btn:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .refresh-btn.spinning svg { animation: spin .7s linear infinite; }
+
+  .topline-actions { display: flex; align-items: center; gap: 8px; }
+
+  .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px 9px 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 22px;
+  }
+
+  /* Search */
+  .search-zone { margin-bottom: 28px; }
+
+  .search-label {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 16px;
+    flex: 1;
+  }
+
+  .search-bar svg { flex-shrink: 0; color: var(--text-dim); }
+
+  .search-bar input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 14.5px;
+    width: 100%;
+  }
+
+  .search-bar input::placeholder { color: var(--text-faint); }
+
+  .search-row { display: flex; align-items: center; gap: 10px; }
+
+  .search-hint {
+    font-size: 11.5px;
+    color: var(--text-faint);
+    margin-top: 8px;
+  }
+
+  /* Quick lists */
+  .quick-section { margin-bottom: 26px; }
+
+  .quick-head {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .quick-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 9px 10px;
+    margin-bottom: 2px;
+  }
+
+  .quick-thumb {
+    width: 34px;
+    height: 47px;
+    border-radius: 5px;
+    flex-shrink: 0;
+    background: linear-gradient(160deg, var(--c-a, #2a2e35), var(--c-b, #16181c));
+    position: relative;
+    overflow: hidden;
+  }
+
+  .quick-thumb .prog {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    height: 2px;
+    background: rgba(255,255,255,0.15);
+  }
+
+  .quick-thumb .prog span { display: block; height: 100%; background: var(--accent); }
+
+  .quick-info { flex: 1; min-width: 0; }
+  .quick-title { font-size: 12.5px; font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .quick-meta { font-size: 11px; color: var(--text-dim); }
+
+  /* Series screen — seasons + episodes */
+  .series-head { display: flex; gap: 16px; margin-bottom: 20px; }
+  .series-thumb { width: 84px; height: 118px; border-radius: 8px; flex-shrink: 0; background: linear-gradient(160deg, var(--c-a, #2a2e35), var(--c-b, #16181c)); }
+  .series-title { font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+  .series-meta { font-size: 12.5px; color: var(--text-dim); }
+
+  .season-tabs {
+    display: flex; gap: 8px; margin-bottom: 18px;
+    flex-wrap: wrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .season-tabs::-webkit-scrollbar { display: none; }
+  .season-tab {
+    padding: 8px 14px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  }
+  .season-tab.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  .episodes-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); margin-bottom: 10px; }
+
+  .episode-row {
+    display: flex; align-items: center; gap: 12px;
+    width: 100%; padding: 11px 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 8px;
+  }
+
+  .ep-number {
+    width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
+    background: var(--panel-2); display: flex; align-items: center; justify-content: center;
+    font-size: 11.5px; font-weight: 700; color: var(--text-dim);
+  }
+
+  .ep-info { flex: 1; min-width: 0; text-align: left; }
+  .ep-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .ep-meta { font-size: 11px; color: var(--text-dim); }
+  .ep-servers { font-size: 11px; color: var(--accent); flex-shrink: 0; white-space: nowrap; }
+
+  /* Add-server mode tabs (Xtream vs M3U) */
+  .mode-tabs { display: flex; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .mode-tab {
+    flex: 1; padding: 9px; text-align: center; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  }
+  .mode-tab.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  .add-server-fields { display: none; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .add-server-fields.active { display: flex; }
+
+  .field-hint { font-size: 11px; color: var(--text-faint); margin-top: -2px; }
+
+  .list-type-tag {
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
+    padding: 2px 6px; border-radius: 4px; background: var(--panel);
+    color: var(--text-faint); border: 1px solid var(--border); flex-shrink: 0;
+  }
+
+  /* Server scan status */
+  .scan-list { display: none; flex-direction: column; gap: 6px; margin-bottom: 28px; }
+
+  .scan-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px;
+  }
+
+  .scan-row .name { flex: 1; color: var(--text-dim); }
+  .scan-row .status { font-size: 11.5px; }
+  .scan-row.checking .status { color: var(--warn); }
+  .scan-row.found .status { color: var(--accent); }
+  .scan-row.empty .status { color: var(--text-faint); }
+
+  .spinner {
+    width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid var(--border-strong); border-top-color: var(--warn);
+    animation: spin .7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Results */
+  .results-head { display: none; margin-bottom: 12px; }
+  .results-head .count { font-size: 12px; color: var(--text-dim); }
+
+  .result-row {
+    display: flex; align-items: center; gap: 14px;
+    width: 100%; padding: 12px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 8px;
+  }
+
+  .thumb {
+    width: 42px; height: 58px; border-radius: 6px; flex-shrink: 0;
+    background: linear-gradient(160deg, var(--c-a, #2a2e35), var(--c-b, #16181c));
+  }
+
+  .r-info { flex: 1; min-width: 0; }
+  .r-title { font-size: 13.5px; font-weight: 600; margin-bottom: 3px; }
+  .r-meta { font-size: 11.5px; color: var(--text-dim); display: flex; gap: 8px; align-items: center; }
+
+  .type-tag {
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
+    padding: 2px 6px; border-radius: 4px; background: var(--panel-2);
+    color: var(--text-dim); border: 1px solid var(--border);
+  }
+
+  .servers-count { font-size: 11px; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+
+  .empty-state { display: none; text-align: center; padding: 50px 20px; color: var(--text-faint); }
+  .empty-state svg { margin-bottom: 12px; opacity: .4; }
+  .empty-state p { font-size: 13px; }
+
+  /* Full screens (no modals — content is replaced in place) */
+  .screen { display: none; animation: fadeIn .18s ease; }
+  .screen.active { display: block; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+
+  /* Media detail */
+  .media-head { display: flex; gap: 16px; margin-bottom: 20px; }
+  .media-thumb { width: 90px; height: 126px; border-radius: 8px; flex-shrink: 0; background: linear-gradient(160deg, var(--c-a, #2a2e35), var(--c-b, #16181c)); }
+  .media-title { font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+  .media-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .media-plot { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+
+  .servers-section { margin-top: 22px; }
+  .servers-section .label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); margin-bottom: 10px; }
+
+  .server-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px;
+  }
+
+  .server-item .sname { flex: 1; font-size: 13px; font-weight: 500; }
+  .server-item .shost { font-size: 11px; color: var(--text-dim); }
+
+  .watch-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--accent); color: #06231a;
+    font-weight: 700; font-size: 12.5px;
+    padding: 8px 14px; border-radius: 8px; flex-shrink: 0;
+  }
+
+  /* Favourite button */
+  .fav-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text-dim); font-weight: 600; font-size: 12.5px;
+    padding: 8px 14px; border-radius: 8px; flex-shrink: 0;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .fav-btn:hover { color: var(--warn); border-color: var(--warn); }
+  .fav-btn.active {
+    background: rgba(224,167,60,0.12);
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+  .fav-btn svg { transition: transform .2s cubic-bezier(.34,1.56,.64,1); }
+  .fav-btn.active svg { transform: scale(1.25); }
+  @keyframes favPop {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.45); }
+    70%  { transform: scale(.9); }
+    100% { transform: scale(1.25); }
+  }
+  .fav-btn.pop svg { animation: favPop .35s ease forwards; }
+
+  /* Settings screen */
+  .settings-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
+
+  .servers-manage-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px;
+  }
+
+  .servers-manage-item .info { flex: 1; min-width: 0; }
+  .servers-manage-item .sm-name { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .servers-manage-item .sm-host { font-size: 11px; color: var(--text-faint); }
+  .sm-status { font-size: 10.5px; padding: 3px 7px; border-radius: 5px; flex-shrink: 0; }
+  .sm-status.ok { color: var(--accent); background: var(--accent-dim); }
+  .sm-status.syncing { color: var(--warn); }
+
+  /* Expiry badge */
+  .expiry-badge {
+    font-size: 10.5px; font-family: 'JetBrains Mono', monospace;
+    padding: 2px 7px; border-radius: 5px; white-space: nowrap; flex-shrink: 0;
+    border: 1px solid transparent;
+  }
+  .expiry-badge.ok     { color: var(--accent); background: var(--accent-dim); border-color: rgba(41,211,152,.18); }
+  .expiry-badge.warn   { color: var(--warn);   background: rgba(224,167,60,.12); border-color: rgba(224,167,60,.25); }
+  .expiry-badge.danger { color: var(--danger); background: rgba(224,102,92,.12); border-color: rgba(224,102,92,.25); }
+
+  .icon-mini-btn {
+    width: 32px; height: 32px; border-radius: 7px;
+    border: 1px solid var(--border);
+    color: var(--text-dim); display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .add-server-form {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
+  }
+
+  .add-server-form input {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 12px; color: var(--text); font-size: 13px; outline: none; width: 100%;
+  }
+
+  .add-server-btn {
+    background: var(--panel); border: 1px dashed var(--border-strong);
+    color: var(--text-dim); padding: 11px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600; margin-top: 4px; width: 100%; text-align: center;
+  }
+
+  /* On-screen dpad hint bar */
+  .dpad-hints {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: center; gap: 22px;
+    padding: 12px; background: rgba(10,11,13,0.9);
+    border-top: 1px solid var(--border);
+    backdrop-filter: blur(6px);
+    font-size: 11.5px; color: var(--text-faint);
+    z-index: 10;
+  }
+
+  .dpad-hints span { display: flex; align-items: center; gap: 6px; }
+  .dpad-hints kbd {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    padding: 2px 6px; border-radius: 4px; color: var(--text-dim);
+  }
+
+  /* ===================================================
+     RESPONSIVE BREAKPOINTS
+     ================================================ */
+
+  /* ---------- Small mobile (< 420px) ---------- */
+  @media (max-width: 420px) {
+    .app { padding: 16px 14px 76px; }
+
+    .topline { margin-bottom: 28px; }
+
+    /* stack series & media headers vertically */
+    .series-head { flex-direction: column; }
+    .series-thumb { width: 100%; height: 140px; border-radius: 10px; }
+    .series-title { font-size: 17px; }
+
+    .media-head { flex-direction: column; }
+    .media-thumb { width: 100%; height: 150px; border-radius: 10px; }
+    .media-title { font-size: 17px; }
+
+    /* season tabs: no-wrap + horizontal scroll on small screens */
+    .season-tabs { flex-wrap: nowrap; }
+    .season-tab { flex-shrink: 0; }
+
+    /* compact episode rows */
+    .episode-row { padding: 9px 10px; gap: 8px; }
+    .ep-servers { font-size: 10px; }
+    .ep-number { width: 24px; height: 24px; font-size: 10.5px; }
+
+    /* compact result rows */
+    .result-row { padding: 10px; gap: 10px; }
+    .thumb { width: 36px; height: 50px; }
+
+    /* compact dpad hints */
+    .dpad-hints { gap: 10px; font-size: 10px; padding: 9px 12px; }
+    .dpad-hints kbd { font-size: 9.5px; padding: 2px 5px; }
+  }
+
+  /* ---------- Tablet (641px – 1023px) ---------- */
+  @media (min-width: 641px) {
+    .app { max-width: 760px; padding: 32px 32px 100px; }
+
+    .quick-row  { padding: 11px 14px; }
+    .quick-thumb { width: 40px; height: 55px; }
+
+    .result-row { padding: 14px 16px; gap: 16px; }
+    .thumb { width: 48px; height: 66px; }
+    .r-title { font-size: 14.5px; }
+
+    .episode-row { padding: 13px 14px; }
+    .ep-title { font-size: 13.5px; }
+
+    .search-bar { padding: 14px 18px; }
+    .search-bar input { font-size: 15px; }
+
+    .season-tab { padding: 9px 18px; font-size: 13px; }
+  }
+
+  /* ---------- Large / Smart TV (>= 1024px) ---------- */
+  @media (min-width: 1024px) {
+    .app { max-width: 1120px; padding: 48px 48px 100px; }
+
+    /* two-column quick section grid */
+    #quickSections {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 40px;
+    }
+    .quick-section { margin-bottom: 20px; }
+
+    /* bigger thumbnails */
+    .quick-thumb { width: 46px; height: 63px; }
+    .thumb { width: 56px; height: 77px; border-radius: 8px; }
+    .series-thumb { width: 110px; height: 154px; }
+    .media-thumb  { width: 110px; height: 154px; }
+
+    /* readable at TV distance */
+    .series-title, .media-title { font-size: 22px; }
+    .r-title { font-size: 15px; }
+    .r-meta  { font-size: 12.5px; }
+    .ep-title { font-size: 14px; }
+    .ep-meta  { font-size: 12px; }
+    .series-meta { font-size: 13.5px; }
+    .quick-title { font-size: 13.5px; }
+    .quick-meta  { font-size: 12px; }
+
+    .search-bar { padding: 16px 20px; border-radius: 12px; }
+    .search-bar input { font-size: 16px; }
+
+    /* bigger touch / D-pad targets */
+    .episode-row { padding: 15px 16px; border-radius: 12px; }
+    .result-row  { padding: 16px 18px; border-radius: 12px; gap: 18px; }
+    .quick-row   { padding: 13px 16px; }
+
+    /* season tabs */
+    .season-tabs { gap: 10px; margin-bottom: 22px; }
+    .season-tab { padding: 10px 20px; font-size: 13.5px; border-radius: 10px; }
+
+    /* episode number badge */
+    .ep-number { width: 32px; height: 32px; font-size: 12.5px; border-radius: 8px; }
+
+    /* server items */
+    .server-item { padding: 14px 16px; border-radius: 12px; }
+    .watch-btn { padding: 10px 18px; font-size: 13px; border-radius: 10px; }
+
+    /* settings */
+    .add-server-fields input { padding: 13px 14px; font-size: 14px; }
+    .add-server-btn { font-size: 13px; padding: 13px; }
+
+    /* gear button */
+    .gear-btn { width: 48px; height: 48px; border-radius: 11px; }
+
+    /* dpad hints */
+    .dpad-hints { gap: 32px; font-size: 13px; padding: 14px 24px; }
+    .dpad-hints kbd { font-size: 12px; padding: 3px 8px; }
+  }
+
+  /* ---------- Extra large / 4K TV (>= 1440px) ---------- */
+  @media (min-width: 1440px) {
+    .app { max-width: 1360px; padding: 56px 64px 110px; }
+
+    #quickSections { gap: 0 56px; }
+
+    .series-thumb { width: 130px; height: 182px; }
+    .media-thumb  { width: 130px; height: 182px; }
+
+    .series-title, .media-title { font-size: 25px; }
+    .search-bar input { font-size: 17px; }
+    .search-bar { padding: 18px 22px; }
+
+    .episode-row { padding: 17px 18px; }
+    .result-row  { padding: 18px 20px; }
+
+    .dpad-hints { font-size: 14px; gap: 40px; padding: 16px 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- HOME SCREEN -->
+  <div class="screen active" id="screen-home">
+    <div class="topline">
+      <div class="logo"><span class="dot"></span>StreamFind</div>
+      <div class="topline-actions">
+        <button class="refresh-btn fx" id="btnRefresh" onclick="refreshAll()" aria-label="Atualizar servidores">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+        </button>
+        <button class="gear-btn fx" id="btnSettings" onclick="goTo('settings')" aria-label="Gerenciar servidores">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="search-zone">
+      <div class="search-label">Buscar em <span class="mono" id="serverCountLabel">4</span> servidores conectados</div>
+      <div class="search-bar">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="searchInput" class="fx" placeholder="Nome do filme, série ou canal..." onkeydown="if(event.key==='Enter'){ event.preventDefault(); runSearch(); }">
+      </div>
+      <div class="search-hint">OK / Enter para buscar em todos os servidores ativos</div>
+    </div>
+
+    <div id="quickSections">
+      <div class="quick-section">
+        <div class="quick-head">Vistos por último</div>
+        <div id="recentList"></div>
+      </div>
+      <div class="quick-section">
+        <div class="quick-head">Favoritos</div>
+        <div id="favoritesList"></div>
+      </div>
+    </div>
+
+    <div class="scan-list" id="scanList"></div>
+
+    <div class="results-head" id="resultsHead">
+      <span class="mono count" id="resultsCount"></span>
+    </div>
+
+    <div id="resultsList"></div>
+
+    <div class="empty-state" id="emptyState">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <p>Nenhum resultado encontrado em nenhum servidor.</p>
+    </div>
+  </div>
+
+  <!-- SERIES SCREEN — season / episode picker -->
+  <div class="screen" id="screen-series">
+    <button class="back-btn fx" id="seriesBackBtn" onclick="goBack()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+    <div id="seriesContent"></div>
+  </div>
+
+  <!-- DETAIL SCREEN -->
+  <div class="screen" id="screen-detail">
+    <button class="back-btn fx" id="detailBackBtn" onclick="goBack()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+    <div id="mediaContent"></div>
+  </div>
+
+  <!-- SETTINGS SCREEN -->
+  <div class="screen" id="screen-settings">
+    <button class="back-btn fx" onclick="goTo('home')">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+      Voltar
+    </button>
+    <div class="settings-title">Servidores</div>
+    <div id="serversManageList"></div>
+    <div class="mode-tabs">
+      <button class="mode-tab fx active" id="tabXtream" onclick="setAddMode('xtream')">Xtream API</button>
+      <button class="mode-tab fx" id="tabM3u" onclick="setAddMode('m3u')">Lista M3U</button>
+    </div>
+
+    <div class="add-server-fields active" id="fieldsXtream">
+      <input type="text" id="newServerName" class="fx" placeholder="Nome (ex: Servidor Principal)">
+      <input type="text" id="newServerHost" class="fx" placeholder="Host / IP">
+      <input type="text" id="newServerPort" class="fx" placeholder="Porta">
+      <input type="text" id="newServerUser" class="fx" placeholder="Usuário">
+      <input type="text" id="newServerPass" class="fx" placeholder="Senha">
+      <button class="add-server-btn fx" onclick="addServer('xtream')">+ Adicionar servidor</button>
+    </div>
+
+    <div class="add-server-fields" id="fieldsM3u">
+      <input type="text" id="newM3uName" class="fx" placeholder="Nome (ex: Lista do provedor X)">
+      <input type="text" id="newM3uUrl" class="fx" placeholder="http://provedor.com/lista.m3u?user=...&pass=...">
+      <div class="field-hint">Cole o link completo da lista M3U/M3U8. O app baixa e sincroniza o catálogo automaticamente.</div>
+      <button class="add-server-btn fx" onclick="addServer('m3u')">+ Adicionar lista</button>
+    </div>
+  </div>
+
+</div>
+
+
+
+<script>
+  let servers = [
+    { id: 1, name: 'Servidor Principal', host: '192.168.1.50',      port: '8080',  status: 'ok',      expiry: '2026-08-15' },
+    { id: 2, name: 'Homelab Backup',     host: 'stream.home.lan',   port: '25461', status: 'ok',      expiry: '2026-07-20' },
+    { id: 3, name: 'Provedor A',         host: 'srv-a.provider.tech', port: '80',  status: 'ok',      expiry: '2026-07-12' },
+    { id: 4, name: 'Provedor B',         host: 'srv-b.provider.tech', port: '2095',status: 'syncing', expiry: '2026-12-31' }
+  ];
+
+  const recentWatched = [
+    { title: 'A Sombra do Vale', meta: 'S02 E04 · 42min restantes', colors: ['#3a2f4d','#191622'], progress: 64 },
+    { title: 'Rota Noturna', meta: 'Filme · 78% assistido', colors: ['#2d4a4a','#132020'], progress: 78 },
+    { title: 'Fronteira Zero', meta: 'S01 E11 · 18min restantes', colors: ['#4a3524','#1c140d'], progress: 88 }
+  ];
+
+  let favoritedTitles = new Set(['Império de Vidro']);  // pre-seeded example
+
+  const catalog = [
+    {
+      title: 'A Sombra do Vale', type: 'serie', year: 2024,
+      colors: ['#3a2f4d','#191622'], servers: [1,3],
+      plot: 'Um detetive solitário persegue uma organização secreta através das sombrias montanhas do Vale do Norte, onde nada é o que parece.',
+      seasons: [
+        {
+          num: 1, episodes: [
+            { num: 1, title: 'Piloto', duration: '48min', servers: [1,3] },
+            { num: 2, title: 'A Primeira Pista', duration: '44min', servers: [1,3] },
+            { num: 3, title: 'Rastros no Gelo', duration: '51min', servers: [1] },
+            { num: 4, title: 'Noite sem Fim', duration: '46min', servers: [3] },
+            { num: 5, title: 'O Informante', duration: '49min', servers: [1,3] },
+            { num: 6, title: 'Fogo Cruzado', duration: '52min', servers: [1,3] }
+          ]
+        },
+        {
+          num: 2, episodes: [
+            { num: 1, title: 'Retorno', duration: '47min', servers: [1,3] },
+            { num: 2, title: 'A Organização', duration: '50min', servers: [1,3] },
+            { num: 3, title: 'Infiltrado', duration: '45min', servers: [1] },
+            { num: 4, title: 'Traição', duration: '53min', servers: [1,3] },
+            { num: 5, title: 'O Arquivo Secreto', duration: '48min', servers: [3] }
+          ]
+        }
+      ]
+    },
+    { title: 'Rota Noturna', type: 'filme', year: 2024, colors: ['#2d4a4a','#132020'], servers: [1,2,3],
+      plot: 'Em uma estrada deserta no meio da noite, dois desconhecidos se cruzam e descobrem que seus destinos estão perigosamente entrelaçados.' },
+    {
+      title: 'Fronteira Zero', type: 'serie', year: 2023,
+      colors: ['#4a3524','#1c140d'], servers: [2],
+      plot: 'Agentes de fronteira enfrentam dilemas morais enquanto lidam com crises humanitárias em uma zona de conflito fictícia.',
+      seasons: [
+        {
+          num: 1, episodes: [
+            { num: 1, title: 'Zona de Exclusão', duration: '42min', servers: [2] },
+            { num: 2, title: 'Os Refugiados', duration: '44min', servers: [2] },
+            { num: 3, title: 'Linha Vermelha', duration: '41min', servers: [2] },
+            { num: 4, title: 'Contrabando', duration: '45min', servers: [2] },
+            { num: 5, title: 'O Agente Duplo', duration: '43min', servers: [2] },
+            { num: 6, title: 'Evacuação', duration: '46min', servers: [2] },
+            { num: 7, title: 'Sem Saída', duration: '48min', servers: [2] },
+            { num: 8, title: 'Fronteira Zero', duration: '55min', servers: [2] }
+          ]
+        },
+        {
+          num: 2, episodes: [
+            { num: 1, title: 'Novo Protocolo', duration: '43min', servers: [2] },
+            { num: 2, title: 'A Aliança', duration: '42min', servers: [2] },
+            { num: 3, title: 'Tensão Máxima', duration: '47min', servers: [2] }
+          ]
+        },
+        {
+          num: 3, episodes: [
+            { num: 1, title: 'A Última Missão', duration: '44min', servers: [2] },
+            { num: 2, title: 'Sacrifício', duration: '50min', servers: [2] },
+            { num: 3, title: 'Paz Armada', duration: '46min', servers: [2] },
+            { num: 4, title: 'Fim da Linha', duration: '58min', servers: [2] }
+          ]
+        }
+      ]
+    },
+    { title: 'Império de Vidro', type: 'filme', year: 2022, colors: ['#4a2c3a','#1e0f16'], servers: [1,2,3,4],
+      plot: 'Uma herdeira descobre que o império de negócios da família foi construído sobre mentiras — e decide desmoroná-lo de dentro para fora.' },
+    { title: 'Canal ESPN HD', type: 'live', year: null, colors: ['#2c3a4d','#131a24'], servers: [1,4],
+      plot: 'Transmissão ao vivo de esportes 24h.' }
+  ];
+
+  /* ---------- Screen / navigation stack (replaces modals) ---------- */
+  let screenStack = ['home'];
+
+  function goTo(name) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + name).classList.add('active');
+    if (screenStack[screenStack.length - 1] !== name) screenStack.push(name);
+    focusFirst();
+  }
+
+  function goBack() {
+    if (screenStack.length > 1) {
+      screenStack.pop();
+      const prev = screenStack[screenStack.length - 1];
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      document.getElementById('screen-' + prev).classList.add('active');
+      focusFirst();
+    }
+  }
+
+  /* ---------- D-pad spatial navigation ---------- */
+  function getFocusables() {
+    return Array.from(document.querySelectorAll('.fx')).filter(el => el.offsetParent !== null);
+  }
+
+  function computeRows(list) {
+    const items = list.map(el => {
+      const r = el.getBoundingClientRect();
+      return { el, top: Math.round(r.top), left: Math.round(r.left) };
+    }).sort((a, b) => a.top - b.top || a.left - b.left);
+    const rows = [];
+    items.forEach(item => {
+      let row = rows.find(r => Math.abs(r.top - item.top) < 14);
+      if (!row) { row = { top: item.top, items: [] }; rows.push(row); }
+      row.items.push(item);
+    });
+    rows.forEach(r => r.items.sort((a, b) => a.left - b.left));
+    return rows;
+  }
+
+  function moveFocus(dir) {
+    const list = getFocusables();
+    if (!list.length) return;
+    const active = document.activeElement;
+    if (!list.includes(active)) { list[0].focus(); return; }
+    const rows = computeRows(list);
+    let curRowIdx = -1, curColIdx = -1;
+    rows.forEach((row, ri) => { const ci = row.items.findIndex(i => i.el === active); if (ci !== -1) { curRowIdx = ri; curColIdx = ci; } });
+    if (curRowIdx === -1) return;
+
+    if (dir === 'down' || dir === 'up') {
+      const targetRi = dir === 'down' ? curRowIdx + 1 : curRowIdx - 1;
+      const targetRow = rows[targetRi];
+      if (!targetRow) return;
+      const curLeft = rows[curRowIdx].items[curColIdx].left;
+      let best = targetRow.items[0];
+      let bestDist = Infinity;
+      targetRow.items.forEach(i => { const d = Math.abs(i.left - curLeft); if (d < bestDist) { bestDist = d; best = i; } });
+      best.el.focus();
+    } else {
+      const row = rows[curRowIdx];
+      const targetCi = dir === 'right' ? curColIdx + 1 : curColIdx - 1;
+      if (row.items[targetCi]) row.items[targetCi].el.focus();
+    }
+  }
+
+  function focusFirst() {
+    const list = getFocusables();
+    if (list.length) list[0].focus();
+  }
+
+  window.addEventListener('keydown', (e) => {
+    const tag = document.activeElement.tagName;
+    const isTyping = tag === 'INPUT' || tag === 'TEXTAREA';
+
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+      if (isTyping && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+      e.preventDefault();
+      const map = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
+      moveFocus(map[e.key]);
+    } else if (e.key === 'Escape' || e.key === 'Backspace') {
+      if (isTyping && e.key === 'Backspace') return;
+      e.preventDefault();
+      goBack();
+    }
+  });
+
+  /* ---------- Rendering ---------- */
+  function renderServerCount() {
+    document.getElementById('serverCountLabel').textContent = servers.filter(s => s.status === 'ok').length;
+  }
+
+  function renderQuickLists() {
+    document.getElementById('recentList').innerHTML = recentWatched.map((r, i) => `
+      <button class="quick-row fx" onclick="document.getElementById('searchInput').value='${r.title}'; runSearch();">
+        <div class="quick-thumb" style="--c-a:${r.colors[0]}; --c-b:${r.colors[1]};">
+          <div class="prog"><span style="width:${r.progress}%"></span></div>
+        </div>
+        <div class="quick-info">
+          <div class="quick-title">${r.title}</div>
+          <div class="quick-meta">${r.meta}</div>
+        </div>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-faint); flex-shrink:0;"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </button>
+    `).join('');
+
+    // Build favorites list from live catalog entries that are favorited
+    const favItems = catalog.filter(c => favoritedTitles.has(c.title));
+    const favHtml = favItems.length
+      ? favItems.map(f => `
+          <button class="quick-row fx" onclick="document.getElementById('searchInput').value='${f.title}'; runSearch();">
+            <div class="quick-thumb" style="--c-a:${f.colors[0]}; --c-b:${f.colors[1]};"></div>
+            <div class="quick-info">
+              <div class="quick-title">${f.title}</div>
+              <div class="quick-meta">${f.type === 'serie' ? 'Série' : f.type === 'live' ? 'Ao vivo' : 'Filme'} · ${f.year || 'ao vivo'}</div>
+            </div>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="color:var(--warn); flex-shrink:0;"><path d="M12 17.3l-6.16 3.24 1.18-6.88L2 8.76l6.92-1L12 1.5l3.08 6.26 6.92 1-5.02 4.9 1.18 6.88z"/></svg>
+          </button>`).join('')
+      : `<div style="color:var(--text-faint);font-size:12.5px;padding:10px 0;">Nenhum favorito ainda. Use ★ nas telas de detalhe.</div>`;
+
+    document.getElementById('favoritesList').innerHTML = favHtml;
+  }
+
+  function runSearch() {
+    const q = document.getElementById('searchInput').value.trim().toLowerCase();
+    const scanList = document.getElementById('scanList');
+    const resultsHead = document.getElementById('resultsHead');
+    const resultsList = document.getElementById('resultsList');
+    const emptyState = document.getElementById('emptyState');
+    const quickSections = document.getElementById('quickSections');
+
+    resultsList.innerHTML = '';
+    resultsHead.style.display = 'none';
+    emptyState.style.display = 'none';
+
+    if (!q) {
+      quickSections.style.display = 'block';
+      scanList.style.display = 'none';
+      return;
+    }
+
+    quickSections.style.display = 'none';
+    scanList.style.display = 'flex';
+    scanList.innerHTML = servers.filter(s => s.status === 'ok').map(s =>
+      `<div class="scan-row checking" id="scan-${s.id}">
+        <div class="spinner"></div>
+        <span class="name mono">${s.name}</span>
+        <span class="status">buscando...</span>
+      </div>`
+    ).join('');
+
+    const activeServers = servers.filter(s => s.status === 'ok');
+    let matches = catalog.filter(m => m.title.toLowerCase().includes(q));
+
+    activeServers.forEach((s, i) => {
+      setTimeout(() => {
+        const row = document.getElementById(`scan-${s.id}`);
+        if (!row) return;
+        const hasMatch = matches.some(m => m.servers.includes(s.id));
+        row.classList.remove('checking');
+        row.classList.add(hasMatch ? 'found' : 'empty');
+        row.innerHTML = `<span class="name mono">${s.name}</span><span class="status">${hasMatch ? '\u2713 encontrado' : 'sem resultado'}</span>`;
+        if (i === activeServers.length - 1) setTimeout(() => showResults(matches, q), 250);
+      }, 260 + i * 220);
+    });
+  }
+
+  function showResults(matches, q) {
+    const resultsHead = document.getElementById('resultsHead');
+    const resultsList = document.getElementById('resultsList');
+    const emptyState = document.getElementById('emptyState');
+    const scanList = document.getElementById('scanList');
+
+    scanList.style.display = 'none';
+
+    if (matches.length === 0) { emptyState.style.display = 'block'; return; }
+
+    resultsHead.style.display = 'block';
+    document.getElementById('resultsCount').textContent = `${matches.length} resultado${matches.length > 1 ? 's' : ''} para "${q}"`;
+
+    resultsList.innerHTML = matches.map((m, idx) => `
+      <button class="result-row fx" onclick="${m.type === 'serie' ? 'openSeries' : 'openMedia'}(${idx})">
+        <div class="thumb" style="--c-a:${m.colors[0]}; --c-b:${m.colors[1]};"></div>
+        <div class="r-info">
+          <div class="r-title">${m.title}</div>
+          <div class="r-meta"><span class="type-tag">${m.type}</span><span>${m.year || 'ao vivo'}</span></div>
+        </div>
+        <div class="servers-count mono">${m.servers.length} servidor${m.servers.length > 1 ? 'es' : ''}</div>
+      </button>
+    `).join('');
+
+    window.currentMatches = matches;
+    getFocusables().find(el => el.classList.contains('result-row'))?.focus();
+  }
+
+  /* ---------- Expiry badge helper ---------- */
+  function expiryBadge(expiry) {
+    if (!expiry) return '';
+    const days = Math.ceil((new Date(expiry) - new Date()) / 86400000);
+    let cls, label;
+    if (days < 0)       { cls = 'danger'; label = 'Vencido'; }
+    else if (days === 0){ cls = 'danger'; label = 'Vence hoje'; }
+    else if (days <= 7) { cls = 'danger'; label = `Vence em ${days}d`; }
+    else if (days <= 30){ cls = 'warn';   label = `Vence em ${days}d`; }
+    else {
+      const d = new Date(expiry);
+      label = d.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'numeric' });
+      cls = 'ok';
+    }
+    return `<span class="expiry-badge ${cls}">${label}</span>`;
+  }
+
+  function toggleFavorite(title, btnEl) {
+    if (favoritedTitles.has(title)) {
+      favoritedTitles.delete(title);
+      btnEl.classList.remove('active', 'pop');
+    } else {
+      favoritedTitles.add(title);
+      btnEl.classList.remove('pop');
+      void btnEl.offsetWidth; // reflow to restart animation
+      btnEl.classList.add('active', 'pop');
+    }
+    // update star label
+    const star = btnEl.querySelector('.fav-label');
+    if (star) star.textContent = favoritedTitles.has(title) ? 'Favoritado' : 'Favoritar';
+    renderQuickLists();
+  }
+
+  function favBtnHtml(title) {
+    const active = favoritedTitles.has(title);
+    return `<button class="fav-btn fx ${active ? 'active' : ''}" onclick="toggleFavorite('${title.replace(/'/g, "\\'")}", this)" aria-label="Favoritar">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="${active ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M12 17.3l-6.16 3.24 1.18-6.88L2 8.76l6.92-1L12 1.5l3.08 6.26 6.92 1-5.02 4.9 1.18 6.88z"/></svg>
+      <span class="fav-label">${active ? 'Favoritado' : 'Favoritar'}</span>
+    </button>`;
+  }
+
+  function openMedia(idx) {
+    const m = window.currentMatches[idx];
+    const availServers = servers.filter(s => m.servers.includes(s.id));
+    document.getElementById('mediaContent').innerHTML = `
+      <div class="media-head">
+        <div class="media-thumb" style="--c-a:${m.colors[0]}; --c-b:${m.colors[1]};"></div>
+        <div>
+          <div class="media-title">${m.title}</div>
+          <div class="media-tags">
+            <span class="type-tag">${m.type}</span>
+            <span class="type-tag">${m.year || 'ao vivo'}</span>
+          </div>
+          <div class="media-plot">${m.plot || 'Sinopse não disponível.'}</div>
+          <div style="margin-top:14px;">${favBtnHtml(m.title)}</div>
+        </div>
+      </div>
+      <div class="servers-section">
+        <div class="label">Disponível em</div>
+        ${availServers.map(s => `
+          <div class="server-item">
+            <div style="flex:1;min-width:0;">
+              <span class="sname">${s.name}</span>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:3px;">
+                <span class="shost mono">${s.host}:${s.port}</span>
+                ${expiryBadge(s.expiry)}
+              </div>
+            </div>
+            <button class="watch-btn fx" onclick="watchOn('${s.host}','${s.port}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Assistir
+            </button>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    goTo('detail');
+  }
+
+  function watchOn(host, port) {
+    const url = `http://${host}:${port}/movie/user/pass/stream.mp4`;
+    window.open(url, '_blank');
+  }
+
+  /* ---------- Series screen ---------- */
+  let currentSerieIdx = null;
+  let currentSeason = 1;
+
+  function openSeries(idx) {
+    currentSerieIdx = idx;
+    const m = window.currentMatches[idx];
+    currentSeason = m.seasons ? m.seasons[0].num : 1;
+    renderSeriesScreen(m);
+    goTo('series');
+  }
+
+  function selectSeason(num) {
+    currentSeason = num;
+    const m = window.currentMatches[currentSerieIdx];
+    renderSeriesScreen(m);
+    // re-focus after re-render
+    const tabs = document.querySelectorAll('.season-tab');
+    tabs.forEach(t => { if (Number(t.dataset.season) === num) t.focus(); });
+  }
+
+  function renderSeriesScreen(m) {
+    const season = m.seasons.find(s => s.num === currentSeason);
+    const availServers = servers.filter(s => m.servers.includes(s.id));
+
+    const tabsHtml = m.seasons.map(s => `
+      <button class="season-tab fx ${s.num === currentSeason ? 'active' : ''}" data-season="${s.num}" onclick="selectSeason(${s.num})">
+        Temporada ${s.num}
+      </button>
+    `).join('');
+
+    const episodesHtml = season ? season.episodes.map(ep => {
+      const epServers = servers.filter(s => ep.servers.includes(s.id));
+      const serverNames = epServers.map(s => s.name).join(', ');
+      return `
+      <button class="episode-row fx" onclick="openEpisode(${ep.num})" title="Disponível em: ${serverNames}">
+        <div class="ep-number">${ep.num}</div>
+        <div class="ep-info">
+          <div class="ep-title">${ep.title}</div>
+          <div class="ep-meta">${ep.duration} · ${epServers.length} servidor${epServers.length !== 1 ? 'es' : ''}</div>
+        </div>
+        <div class="ep-servers">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="margin-right:4px;vertical-align:middle;"><path d="M8 5v14l11-7z"/></svg>
+          ${epServers.length > 0 ? 'Assistir' : 'Indisponível'}
+        </div>
+      </button>`;
+    }).join('') : '<div style="color:var(--text-faint);font-size:13px;padding:16px 0;">Nenhum episódio encontrado.</div>';
+
+    document.getElementById('seriesContent').innerHTML = `
+      <div class="series-head">
+        <div class="series-thumb" style="--c-a:${m.colors[0]}; --c-b:${m.colors[1]};"></div>
+        <div>
+          <div class="series-title">${m.title}</div>
+          <div class="series-meta">${m.year} · ${m.seasons.length} temporada${m.seasons.length !== 1 ? 's' : ''} · ${availServers.length} servidor${availServers.length !== 1 ? 'es' : ''}</div>
+          <div class="series-meta" style="margin-top:8px;line-height:1.5;">${m.plot || ''}</div>
+          <div style="margin-top:14px;">${favBtnHtml(m.title)}</div>
+        </div>
+      </div>
+      <div class="season-tabs">${tabsHtml}</div>
+      <div class="episodes-label">${season ? season.episodes.length : 0} Episódios — Temporada ${currentSeason}</div>
+      ${episodesHtml}
+    `;
+  }
+
+  function openEpisode(epNum) {
+    const m = window.currentMatches[currentSerieIdx];
+    const season = m.seasons.find(s => s.num === currentSeason);
+    if (!season) return;
+    const ep = season.episodes.find(e => e.num === epNum);
+    if (!ep) return;
+    const epServers = servers.filter(s => ep.servers.includes(s.id));
+
+    document.getElementById('mediaContent').innerHTML = `
+      <div class="media-head">
+        <div class="media-thumb" style="--c-a:${m.colors[0]}; --c-b:${m.colors[1]};"></div>
+        <div>
+          <div class="media-title">${m.title}</div>
+          <div class="media-tags">
+            <span class="type-tag">série</span>
+            <span class="type-tag">T${currentSeason} E${epNum}</span>
+            <span class="type-tag">${ep.duration}</span>
+          </div>
+          <div class="media-plot">${ep.title}</div>
+        </div>
+      </div>
+      <div class="servers-section">
+        <div class="label">Disponível em</div>
+        ${epServers.map(s => `
+          <div class="server-item">
+            <div style="flex:1;min-width:0;">
+              <span class="sname">${s.name}</span>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:3px;">
+                <span class="shost mono">${s.host}:${s.port}</span>
+                ${expiryBadge(s.expiry)}
+              </div>
+            </div>
+            <button class="watch-btn fx" onclick="watchOn('${s.host}','${s.port}')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Assistir
+            </button>
+          </div>
+        `).join('')}
+        ${epServers.length === 0 ? '<div style="color:var(--danger);font-size:13px;padding:8px 0;">Este episódio não está disponível em nenhum servidor ativo.</div>' : ''}
+      </div>
+    `;
+    goTo('detail');
+  }
+
+  function renderServersManage() {
+    document.getElementById('serversManageList').innerHTML = servers.map(s => `
+      <div class="servers-manage-item">
+        <div class="info">
+          <div class="sm-name">${s.name}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:2px;flex-wrap:wrap;">
+            <div class="sm-host mono">${s.host}:${s.port}</div>
+            ${expiryBadge(s.expiry)}
+          </div>
+        </div>
+        <span class="sm-status ${s.status === 'ok' ? 'ok' : 'syncing'}">${s.status === 'ok' ? 'sincronizado' : 'sincronizando...'}</span>
+        <button class="icon-mini-btn fx" onclick="removeServer(${s.id})" aria-label="Remover servidor">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+        </button>
+      </div>
+    `).join('');
+  }
+
+  function removeServer(id) {
+    servers = servers.filter(s => s.id !== id);
+    renderServersManage();
+    renderServerCount();
+    focusFirst();
+  }
+
+  function addServer() {
+    const name = document.getElementById('newServerName').value.trim();
+    const host = document.getElementById('newServerHost').value.trim();
+    const port = document.getElementById('newServerPort').value.trim();
+    if (!name || !host || !port) return;
+    const newId = Date.now();
+    servers.push({ id: newId, name, host, port, status: 'syncing' });
+    ['newServerName','newServerHost','newServerPort','newServerUser','newServerPass'].forEach(id => document.getElementById(id).value = '');
+    renderServersManage();
+    renderServerCount();
+    setTimeout(() => {
+      servers = servers.map(s => s.id === newId ? { ...s, status: 'ok' } : s);
+      renderServersManage();
+      renderServerCount();
+    }, 1400);
+  }
+
+  renderServerCount();
+  renderQuickLists();
+  renderServersManage();
+
+  function refreshAll() {
+    const btn = document.getElementById('btnRefresh');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+
+    // Simulate syncing: set all servers to 'syncing' briefly then back to 'ok'
+    const prevStatuses = servers.map(s => ({ id: s.id, status: s.status }));
+    servers = servers.map(s => ({ ...s, status: 'syncing' }));
+    renderServerCount();
+    renderServersManage();
+
+    setTimeout(() => {
+      servers = servers.map(s => {
+        const prev = prevStatuses.find(p => p.id === s.id);
+        return { ...s, status: prev ? prev.status : 'ok' };
+      });
+      renderServerCount();
+      renderQuickLists();
+      renderServersManage();
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+    }, 1400);
+  }
+
+  document.getElementById('searchInput').addEventListener('input', (e) => {
+    if (!e.target.value.trim()) runSearch();
+  });
+
+  focusFirst();
+</script>
+
+</body>
+</html>
