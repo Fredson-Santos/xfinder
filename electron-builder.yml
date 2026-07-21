@@ -1,0 +1,37 @@
+appId: com.xfinder.app
+productName: XFinder
+
+directories:
+  output: release
+
+files:
+  - dist/**
+  - index.html
+  - css/**
+  - js/**
+  - node_modules/sql.js/dist/sql-wasm.wasm
+  - "!src/**"
+  - "!src-tauri/**"
+  - "!*.ts"
+
+# Inclui o .wasm ao lado dos recursos para acesso em runtime
+extraResources:
+  - from: node_modules/sql.js/dist/sql-wasm.wasm
+    to: sql-wasm.wasm
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: src-tauri/icons/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+mac:
+  target: dmg
+
+linux:
+  target: AppImage

@@ -18,6 +18,23 @@ window.addEventListener('DOMContentLoaded', async () => {
   await loadServers();
   setupSearch();
   setupKeyboard();
+
+  const xHost = el('xHost');
+  if (xHost) {
+    xHost.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      if (val.includes('get.php') || val.includes('username=') || val.includes('password=')) {
+        try {
+          const url = new URL(val);
+          e.target.value = url.origin;
+          const user = url.searchParams.get('username');
+          const pass = url.searchParams.get('password');
+          if (user) el('xUser').value = user;
+          if (pass) el('xPass').value = pass;
+        } catch (err) {}
+      }
+    });
+  }
 });
 
 async function loadServers() {
@@ -327,7 +344,9 @@ function buildStreamUrl(occ, streamId, ext, type) {
   if (!occ.host) return '';
   const pathType = type === 'live' ? 'live' : type === 'series' ? 'series' : 'movie';
   const extension = type === 'live' ? 'ts' : (ext || 'mp4');
-  return `http://${occ.host}:${occ.port}/${pathType}/${occ.username}/${occ.password}/${streamId}.${extension}`;
+  const portStr = occ.port ? `:${occ.port}` : '';
+  const hostStr = occ.host.startsWith('http') ? occ.host : `http://${occ.host}`;
+  return `${hostStr}${portStr}/${pathType}/${occ.username}/${occ.password}/${streamId}.${extension}`;
 }
 
 async function openStream(url) {
@@ -354,13 +373,12 @@ function renderServersManage() {
 
   list.innerHTML = servers.map(s => {
     const statusLabel = { ok: 'sincronizado', syncing: 'sincronizando...', error: 'erro', pending: 'pendente' }[s.status] || s.status;
-    const hostLine = s.type === 'xtream' ? `${s.host}:${s.port}` : s.m3u_url || '';
     return `
       <div class="servers-manage-item">
         <div class="info">
           <div class="sm-name">${esc(s.name)}</div>
           <div class="sm-host mono">
-            ${esc(hostLine)}
+            ${esc(s.type === 'xtream' ? (s.port ? `${s.host}:${s.port}` : s.host) : s.m3u_url || '')}
             ${expiryBadge(s.expiry)}
           </div>
         </div>
@@ -394,10 +412,10 @@ async function addServer(type) {
   if (type === 'xtream') {
     name     = el('xName').value.trim();
     host     = el('xHost').value.trim();
-    port     = el('xPort').value.trim();
+    port     = '';
     username = el('xUser').value.trim();
     password = el('xPass').value.trim();
-    if (!name || !host || !port) { showToast('Preencha Nome, Host e Porta.'); return; }
+    if (!name || !host) { showToast('Preencha Nome e Host.'); return; }
   } else {
     name   = el('mName').value.trim();
     m3uUrl = el('mUrl').value.trim();
@@ -419,7 +437,7 @@ async function addServer(type) {
     });
 
     // Clear fields
-    ['xName','xHost','xPort','xUser','xPass','mName','mUrl'].forEach(f => {
+    ['xName','xHost','xUser','xPass','mName','mUrl'].forEach(f => {
       const el2 = document.getElementById(f); if (el2) el2.value = '';
     });
 
