@@ -2,12 +2,20 @@
   "name": "xfinder",
   "version": "0.1.0",
   "private": true,
+  "main": "dist/main.js",
   "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
+    "build:ts": "esbuild src/main.ts src/preload.ts --bundle --platform=node --outdir=dist --external:electron --external:sql.js",
+    "dev": "npm run build:ts && electron .",
+    "build": "npm run build:ts && electron-builder"
+  },
+  "dependencies": {
+    "sql.js": "^1.12"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@types/node": "^20",
+    "electron": "^31",
+    "electron-builder": "^24",
+    "esbuild": "^0.21",
+    "typescript": "^5"
   }
 }
