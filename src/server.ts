@@ -15,13 +15,14 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import initSqlJs, { Database } from 'sql.js';
 import * as m3u from './m3u';
 import * as xtream from './xtream';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const HOST = process.env.HOST ?? '127.0.0.1';
+const HOST = process.env.HOST ?? '0.0.0.0';
 
 // ─── DB state ─────────────────────────────────────────────────────────────────
 
@@ -481,8 +482,21 @@ function setupServer(): void {
   app.use('/api', router);
 
   app.listen(PORT, HOST, () => {
-    console.log(`\n  ✦ XFinder rodando em http://${HOST}:${PORT}`);
-    console.log(`  Banco de dados: ${dbPath}`);
+    console.log(`\n  ✦ XFinder rodando com sucesso!`);
+    console.log(`  ➜ Local:   http://localhost:${PORT}`);
+    
+    try {
+      const interfaces = os.networkInterfaces();
+      for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name] ?? []) {
+          if (iface.family === 'IPv4' && !iface.internal) {
+            console.log(`  ➜ Rede (${name}): http://${iface.address}:${PORT}`);
+          }
+        }
+      }
+    } catch (e) {}
+
+    console.log(`  ➜ Banco:   ${dbPath}`);
     console.log(`  Pressione Ctrl+C para parar.\n`);
   });
 }
