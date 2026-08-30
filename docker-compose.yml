@@ -1,0 +1,13 @@
+services:
+  xfinder:
+    build: .
+    image: xfinder:latest
+    container_name: xfinder
+    ports:
+      - "3000:3000"
+    volumes:
+      - xfinder-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  xfinder-data:
