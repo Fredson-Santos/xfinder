@@ -21,7 +21,7 @@ import * as xtream from './xtream';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const HOST = process.env.HOST ?? '0.0.0.0';
+const HOST = process.env.HOST ?? '127.0.0.1';
 
 // ─── DB state ─────────────────────────────────────────────────────────────────
 
@@ -481,7 +481,7 @@ function setupServer(): void {
   app.use('/api', router);
 
   app.listen(PORT, HOST, () => {
-    console.log(`\n  ✦ XFinder rodando em http://localhost:${PORT}`);
+    console.log(`\n  ✦ XFinder rodando em http://${HOST}:${PORT}`);
     console.log(`  Banco de dados: ${dbPath}`);
     console.log(`  Pressione Ctrl+C para parar.\n`);
   });
