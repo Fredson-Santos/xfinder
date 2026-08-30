@@ -1,3 +1,4 @@
+
 /**
  * XFinder — Frontend Logic (Webapp)
  *
@@ -31,11 +32,16 @@ async function invoke(cmd, args = {}) {
     case 'add_server':
       return api('POST', '/servers', args).then(d => d.id);
 
+    case 'add_servers_batch':
+      return api('POST', '/servers/batch', args);
+
     case 'remove_server':
       return api('DELETE', `/servers/${args.serverId}`);
 
-    case 'sync_server':
-      return api('POST', `/servers/${args.serverId}/sync`).then(d => d.message);
+    case 'sync_server': {
+      const q = args.deleteOnError ? '?deleteOnError=true' : '';
+      return api('POST', `/servers/${args.serverId}/sync${q}`).then(d => d.message);
+    }
 
     case 'search':
       return api('GET', `/search?q=${encodeURIComponent(args.query ?? '')}`);
@@ -88,6 +94,25 @@ window.addEventListener('DOMContentLoaded', async () => {
           if (user) el('xUser').value = user;
           if (pass) el('xPass').value = pass;
         } catch (err) {}
+      }
+    });
+  }
+
+  const dropZone = el('batchDropZone');
+  if (dropZone) {
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.classList.remove('drag-over');
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        readBatchFile(files[0]);
       }
     });
   }
@@ -383,7 +408,7 @@ function renderSeriesScreen(r, episodeData) {
       ${backdrop ? `<div class="hero-backdrop" style="background-image:url('${esc(backdrop)}')"></div>` : ''}
       <div class="hero-content">
         <div class="hero-poster">
-          ${r.cover_url ? `<img src="${esc(r.cover_url)}" alt="${esc(r.title)}" loading="lazy" onerror="this.style.display='none'">` : ''}
+          ${r.cover_url ? `<img src="${esc(r.cover_url)}" alt="${esc(r.title)}" loading="lazy" decoding="async" onerror="this.style.display='none'">` : ''}
         </div>
         <div class="hero-info">
           <h1 class="hero-title">${esc(r.title)}</h1>
@@ -488,7 +513,7 @@ function renderSeriesScreen(r, episodeData) {
         return `
           <div class="episode-card ${seen ? 'watched' : ''}" id="ep-card-${epNum}">
             <div class="ep-thumb-box fx" tabindex="0" onclick="playEpisodeDirect('${esc(streamUrl)}', '${esc(wKey)}', '${esc(r.title)}', '${esc(epSubTitle)}', ${currentSeason}, ${epNum})">
-              <img src="${esc(epThumb)}" class="ep-thumb-img" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" ${!epThumb ? 'style="display:none"' : ''}>
+              <img src="${esc(epThumb)}" class="ep-thumb-img" alt="" loading="lazy" decoding="async" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" ${!epThumb ? 'style="display:none"' : ''}>
               <div class="ep-thumb-fallback" style="${epThumb ? 'display:none' : 'display:flex'}">
                 <span class="ep-num-big">E${epNum}</span>
               </div>
@@ -618,7 +643,7 @@ function openDetailScreen(r) {
       ${r.cover_url ? `<div class="hero-backdrop" style="background-image:url('${esc(r.cover_url)}')"></div>` : ''}
       <div class="hero-content">
         <div class="hero-poster">
-          ${r.cover_url ? `<img src="${esc(r.cover_url)}" alt="${esc(r.title)}" loading="lazy" onerror="this.style.display='none'">` : ''}
+          ${r.cover_url ? `<img src="${esc(r.cover_url)}" alt="${esc(r.title)}" loading="lazy" decoding="async" onerror="this.style.display='none'">` : ''}
         </div>
         <div class="hero-info">
           <h1 class="hero-title">${esc(r.title)}</h1>
@@ -713,9 +738,11 @@ function renderServersManage() {
 }
 
 function setAddMode(mode) {
-  ['Xtream', 'M3u'].forEach(m => {
-    el('tab'    + m).classList.toggle('active', m.toLowerCase() === mode);
-    el('fields' + m).classList.toggle('active', m.toLowerCase() === mode);
+  ['Xtream', 'M3u', 'Batch'].forEach(m => {
+    const tab = el('tab' + m);
+    const fields = el('fields' + m);
+    if (tab) tab.classList.toggle('active', m.toLowerCase() === mode);
+    if (fields) fields.classList.toggle('active', m.toLowerCase() === mode);
   });
 }
 
@@ -754,11 +781,13 @@ async function addServer(type) {
       const el2 = document.getElementById(f); if (el2) el2.value = '';
     });
 
-    await loadServers();
-    showToast('Servidor adicionado. Sincronizando...');
+    showToast('Validando e sincronizando servidor...');
 
-    // Auto-sync immediately
-    syncServer(id);
+    // Auto-sync immediately with removeOnFail = true
+    const syncRes = await syncServer(id, true);
+    if (syncRes && syncRes.success) {
+      showToast('Servidor sincronizado e salvo com sucesso! ✓');
+    }
   } catch (e) {
     showToast('Erro ao adicionar: ' + e);
   } finally {
@@ -776,20 +805,31 @@ async function removeServer(id) {
   }
 }
 
-async function syncServer(id) {
+async function syncServer(id, removeOnFail = false) {
   // Update UI immediately
   servers = servers.map(s => s.id === id ? { ...s, status: 'syncing' } : s);
   renderServersManage();
   renderServerCount();
 
+  let success = false;
+  let resultMsg = '';
+
   try {
-    const msg = await invoke('sync_server', { serverId: id });
+    const msg = await invoke('sync_server', { serverId: id, deleteOnError: removeOnFail });
+    resultMsg = msg;
+    success = true;
     showToast(msg);
   } catch (e) {
-    showToast('Erro na sincronização: ' + e);
+    resultMsg = e.message || String(e);
+    if (removeOnFail) {
+      showToast('Falha na sincronização: ' + resultMsg + ' (Servidor descartado).');
+    } else {
+      showToast('Erro na sincronização: ' + resultMsg);
+    }
   }
 
   await loadServers();
+  return { success, message: resultMsg };
 }
 
 async function refreshAll() {
@@ -823,7 +863,7 @@ function typeLabel(t) {
 
 function thumbHtml(coverUrl, cls) {
   if (coverUrl) {
-    return `<div class="${cls}"><img src="${esc(coverUrl)}" alt="" loading="lazy" onerror="this.parentElement.style.backgroundImage='none'"></div>`;
+    return `<div class="${cls}"><img src="${esc(coverUrl)}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.style.backgroundImage='none'"></div>`;
   }
   return `<div class="${cls}"></div>`;
 }
@@ -874,12 +914,19 @@ function showToast(msg) {
 let _currentStreamUrl = '';
 let _pendingPlayPayload = null;
 
+// ─── Failover: Estado Multi-Servidor ────────────────────────────────────────
+let _currentPlaybackSources = [];   // Array de { url, serverName, host, status: 'pending'|'ok'|'failed' }
+let _currentSourceIndex = 0;
+let _failoverTimer = null;
+const _FAILOVER_TIMEOUT_MS = 8000;  // 8s para considerar timeout
+
 /**
  * Abre o seletor perguntando se o usuário quer abrir em nova aba / player externo
  * ou no player embutido do navegador.
+ * payload.sources é um array opcional de fontes: [{ url, serverName, host }]
  */
 function promptPlayOptions(payload) {
-  if (!payload || !payload.url) {
+  if (!payload || (!payload.url && (!payload.sources || payload.sources.length === 0))) {
     showToast('URL de stream não disponível.');
     return;
   }
@@ -890,11 +937,12 @@ function promptPlayOptions(payload) {
   const subEl = el('choiceModalSub');
 
   if (titleEl) titleEl.textContent = payload.title || 'Como deseja assistir?';
-  if (subEl) subEl.textContent = payload.subtitle ? `${payload.subtitle}` : 'Escolha onde deseja reproduzir este conteúdo:';
+  const sourceCount = payload.sources ? payload.sources.length : 1;
+  const sourceHint = sourceCount > 1 ? ` (${sourceCount} fontes disponíveis — failover automático)` : '';
+  if (subEl) subEl.textContent = (payload.subtitle || 'Escolha onde deseja reproduzir este conteúdo:') + sourceHint;
 
   if (modal) {
     modal.style.display = 'flex';
-    // Foca o primeiro botão (Nova Aba) para controle D-Pad / teclado
     setTimeout(() => {
       const firstChoice = el('btnChoiceExternal') || modal.querySelector('.choice-card');
       if (firstChoice) firstChoice.focus();
@@ -912,12 +960,12 @@ function closePlayChoice() {
 /**
  * Executa a escolha selecionada no modal:
  * - 'external': nova aba / VLC
- * - 'web': player do navegador
+ * - 'web': player do navegador (com failover multi-servidor)
  * - 'copy': copiar link
  */
 async function confirmPlayChoice(choice) {
   if (!_pendingPlayPayload) return;
-  const { url, wKey, title, subtitle, type } = _pendingPlayPayload;
+  const { url, wKey, title, subtitle, type, sources } = _pendingPlayPayload;
   closePlayChoice();
 
   // Marca como assistido se for episódio
@@ -951,7 +999,12 @@ async function confirmPlayChoice(choice) {
     openExternalUrl(url);
     showToast('Abrindo em nova aba / player externo...');
   } else if (choice === 'web') {
-    playStream(url, title, subtitle);
+    // Se há múltiplas fontes, usar failover
+    if (sources && sources.length > 0) {
+      playWithSources(sources, 0, title, subtitle);
+    } else {
+      playWithSources([{ url, serverName: subtitle || 'Servidor', host: '' }], 0, title, subtitle);
+    }
   } else if (choice === 'copy') {
     copyStreamUrlString(url);
   }
@@ -980,6 +1033,12 @@ function buildEpisodeQueue(series, episodeData, targetSeason, targetEp) {
       const ext = ep.container_extension || 'mp4';
       const occ = series.servers.find(srv => srv.server_type === 'xtream') || series.servers[0];
       const streamUrl = occ ? buildStreamUrl(occ, sid, ext, 'series') : '';
+
+      // Fontes multi-servidor para failover
+      const epSources = series.servers.map(srv => {
+        const u = buildStreamUrl(srv, sid, ext, 'series');
+        return u ? { url: u, serverName: srv.server_name, host: srv.host || '' } : null;
+      }).filter(Boolean);
       const wKey = watchedKey(series, s.num, epNum);
       const epSubTitle = `T${s.num} E${epNum} • ${ep.title || 'Episódio'}`;
 
@@ -991,6 +1050,7 @@ function buildEpisodeQueue(series, episodeData, targetSeason, targetEp) {
         epSubTitle,
         streamUrl,
         wKey,
+        sources: epSources,
       });
     }
   }
@@ -1102,7 +1162,11 @@ function playQueuedEpisode(epItem) {
     renderSeriesScreen(currentResult, window._lastEpisodeData);
   }
 
-  playStream(epItem.streamUrl, currentResult?.title || epItem.seriesTitle, epItem.epSubTitle);
+  // Usa failover multi-servidor se disponível
+  const sources = epItem.sources && epItem.sources.length > 0
+    ? epItem.sources
+    : [{ url: epItem.streamUrl, serverName: 'Servidor', host: '' }];
+  playWithSources(sources, 0, currentResult?.title || epItem.seriesTitle, epItem.epSubTitle);
   showToast(`Reproduzindo: ${epItem.epSubTitle}`);
 }
 
@@ -1115,76 +1179,194 @@ async function playEpisodeDirect(url, wKey, seriesTitle, epSubTitle, seasonNum, 
     _currentSeriesQueue = buildEpisodeQueue(currentResult, window._lastEpisodeData, sNum, eNum);
   }
 
+  // Construir fontes multi-servidor para o episódio
+  const sources = buildSourcesForEpisode(sNum, eNum);
+
   promptPlayOptions({
     url,
     wKey,
     title: currentResult?.title || seriesTitle,
     subtitle: epSubTitle,
-    type: 'series'
+    type: 'series',
+    sources,
   });
+}
+
+/** Constrói lista de fontes de todos os servidores para um episódio */
+function buildSourcesForEpisode(seasonNum, epNum) {
+  if (!currentResult || !window._lastEpisodeData?.episodes) return [];
+  const seasonEps = window._lastEpisodeData.episodes[String(seasonNum)] || [];
+  const ep = seasonEps.find(e => (e.episode_num ?? e.num ?? 0) === epNum);
+  if (!ep) return [];
+
+  const sid = ep.id || ep.stream_id || '';
+  const ext = ep.container_extension || 'mp4';
+
+  return currentResult.servers
+    .map(srv => {
+      const u = buildStreamUrl(srv, sid, ext, 'series');
+      return u ? { url: u, serverName: srv.server_name, host: srv.host || '' } : null;
+    })
+    .filter(Boolean);
+}
+
+/** Constrói lista de fontes de todos os servidores para filme/live */
+function buildSourcesForMedia(result) {
+  if (!result || !result.servers || result.servers.length === 0) return [];
+  return result.servers
+    .map(srv => {
+      const u = buildStreamUrl(srv, srv.stream_id, srv.container_extension, result.type);
+      return u ? { url: u, serverName: srv.server_name, host: srv.host || '' } : null;
+    })
+    .filter(Boolean);
 }
 
 /** Reproduz filme ou canal ao vivo: abre o seletor de reprodução */
 function playMediaDirect(url, title, subtitle) {
   _currentSeriesQueue = null;
+
+  // Construir fontes multi-servidor
+  const sources = currentResult ? buildSourcesForMedia(currentResult) : [];
+
   promptPlayOptions({
     url,
     title: currentResult?.title || title,
     subtitle,
-    type: currentResult?.type || 'movie'
+    type: currentResult?.type || 'movie',
+    sources,
   });
 }
 
-/** Abre o player modal com o stream */
-function playStream(url, title, subtitle) {
-  if (!url) {
-    showToast('URL de stream não disponível.');
+// ─── Failover: Reprodução Multi-Servidor ────────────────────────────────────
+
+/**
+ * Inicia a reprodução com failover automático.
+ * @param {Array} sources - [{url, serverName, host}]
+ * @param {number} startIndex - índice inicial na lista
+ * @param {string} title - título principal
+ * @param {string} subtitle - subtítulo
+ */
+function playWithSources(sources, startIndex, title, subtitle) {
+  if (!sources || sources.length === 0) {
+    showToast('Nenhuma fonte de reprodução disponível.');
     return;
   }
-  _currentStreamUrl = url;
+
+  // Limpar timer anterior
+  if (_failoverTimer) { clearTimeout(_failoverTimer); _failoverTimer = null; }
+
+  // Inicializar estado de fontes
+  _currentPlaybackSources = sources.map(s => ({ ...s, status: 'pending' }));
+  _currentSourceIndex = startIndex || 0;
+
+  // Abrir player e iniciar na fonte selecionada
+  _startSourcePlayback(_currentSourceIndex, title, subtitle, false);
+}
+
+/**
+ * Carrega e reproduz a fonte no índice dado.
+ * @param {boolean} isFailover - se está alternando automaticamente
+ */
+function _startSourcePlayback(index, title, subtitle, isFailover) {
+  if (index < 0 || index >= _currentPlaybackSources.length) return;
+
+  // Limpar timer anterior
+  if (_failoverTimer) { clearTimeout(_failoverTimer); _failoverTimer = null; }
+
+  _currentSourceIndex = index;
+  const source = _currentPlaybackSources[index];
+  _currentStreamUrl = source.url;
 
   const modal = el('playerModal');
   const video = el('mainVideoPlayer');
   const titleEl = el('playerStreamTitle');
   const subEl = el('playerStreamSub');
   const fallback = el('videoErrorFallback');
+  const banner = el('playerFailoverBanner');
 
   if (titleEl) titleEl.textContent = title || 'Reproduzindo';
   if (subEl) subEl.textContent = subtitle || '';
   if (fallback) fallback.style.display = 'none';
 
+  // Mostrar banner de failover
+  if (isFailover && banner) {
+    banner.style.display = 'flex';
+    banner.className = 'player-failover-banner';
+    const failText = el('failoverText');
+    if (failText) failText.textContent = `⚡ Alternando para "${source.serverName}" (${index + 1}/${_currentPlaybackSources.length})...`;
+  } else if (banner) {
+    banner.style.display = 'none';
+  }
+
+  // Atualizar pill e menu
+  _updateSourcePill();
+  _updateSourceMenu();
   updatePlayerButtons();
 
   if (modal) modal.style.display = 'flex';
 
   if (video) {
-    video.src = url;
+    video.src = source.url;
     video.load();
+
+    let _hasStartedPlaying = false;
+
+    // Detecta início real de reprodução
+    video.onplaying = () => {
+      if (_hasStartedPlaying) return;
+      _hasStartedPlaying = true;
+
+      // Cancelar timer de timeout
+      if (_failoverTimer) { clearTimeout(_failoverTimer); _failoverTimer = null; }
+
+      // Marcar fonte como OK
+      _currentPlaybackSources[_currentSourceIndex].status = 'ok';
+      _updateSourcePill();
+      _updateSourceMenu();
+
+      // Mostrar banner de sucesso brevemente se veio de failover
+      if (isFailover && banner) {
+        banner.className = 'player-failover-banner success';
+        const failText = el('failoverText');
+        if (failText) failText.textContent = `✓ Conectado a "${source.serverName}" com sucesso!`;
+        setTimeout(() => { if (banner) banner.style.display = 'none'; }, 3000);
+      }
+    };
 
     // Auto-avanço quando o episódio terminar
     video.onended = () => {
       if (_currentSeriesQueue && _currentSeriesQueue.currentIndex < _currentSeriesQueue.allEpisodes.length - 1) {
         showToast('Próximo episódio iniciando...');
-        setTimeout(() => {
-          playNextEpisode();
-        }, 1200);
+        setTimeout(() => playNextEpisode(), 1200);
       }
+    };
+
+    // Erro no player → failover automático
+    video.onerror = () => {
+      _handleSourceError(title, subtitle);
     };
 
     const playPromise = video.play();
     if (playPromise !== undefined) {
       playPromise.catch(err => {
-        console.warn('Auto-play falhou ou formato não suportado diretamente:', err);
-        if (fallback) fallback.style.display = 'flex';
+        console.warn('Auto-play falhou:', err);
+        // Não tratar AbortError (quando trocamos source rápido)
+        if (err.name !== 'AbortError') {
+          _handleSourceError(title, subtitle);
+        }
       });
     }
 
-    video.onerror = () => {
-      if (fallback) fallback.style.display = 'flex';
-    };
+    // Timeout: se não começou a reproduzir em Xs, failover
+    _failoverTimer = setTimeout(() => {
+      if (!_hasStartedPlaying) {
+        console.warn(`Timeout (${_FAILOVER_TIMEOUT_MS}ms) para fonte ${index}: ${source.serverName}`);
+        _handleSourceError(title, subtitle);
+      }
+    }, _FAILOVER_TIMEOUT_MS);
   }
 
-  // MediaSession API para suporte nativo a controles de mídia e controle remoto
+  // MediaSession API
   if ('mediaSession' in navigator) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -1198,20 +1380,183 @@ function playStream(url, title, subtitle) {
   }
 }
 
+/** Trata erro de uma fonte e tenta failover para a próxima */
+function _handleSourceError(title, subtitle) {
+  if (_failoverTimer) { clearTimeout(_failoverTimer); _failoverTimer = null; }
+
+  // Marcar fonte atual como falha
+  if (_currentPlaybackSources[_currentSourceIndex]) {
+    _currentPlaybackSources[_currentSourceIndex].status = 'failed';
+  }
+
+  // Tentar próxima fonte disponível
+  const nextIndex = _findNextAvailableSource(_currentSourceIndex);
+  if (nextIndex !== -1) {
+    showToast(`"${_currentPlaybackSources[_currentSourceIndex]?.serverName}" indisponível. Alternando...`);
+    _startSourcePlayback(nextIndex, title, subtitle, true);
+  } else {
+    // Todas as fontes falharam
+    _showAllSourcesFailed();
+  }
+}
+
+/** Encontra a próxima fonte não falhada */
+function _findNextAvailableSource(currentIdx) {
+  for (let i = 1; i < _currentPlaybackSources.length; i++) {
+    const idx = (currentIdx + i) % _currentPlaybackSources.length;
+    if (_currentPlaybackSources[idx].status !== 'failed') {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+/** Exibe tela de todas as fontes falharam */
+function _showAllSourcesFailed() {
+  const fallback = el('videoErrorFallback');
+  const banner = el('playerFailoverBanner');
+  const fallbackTitle = el('fallbackTitle');
+  const fallbackDesc = el('fallbackDesc');
+
+  if (banner) {
+    banner.style.display = 'flex';
+    banner.className = 'player-failover-banner all-failed';
+    const failText = el('failoverText');
+    if (failText) failText.textContent = `✕ Nenhuma das ${_currentPlaybackSources.length} fontes respondeu.`;
+  }
+
+  if (fallbackTitle) fallbackTitle.textContent = 'Nenhuma fonte de reprodução disponível';
+  if (fallbackDesc) fallbackDesc.textContent = `Todas as ${_currentPlaybackSources.length} fontes foram testadas sem sucesso. Tente abrir em um player externo (VLC) ou tente novamente mais tarde.`;
+  if (fallback) fallback.style.display = 'flex';
+
+  _updateSourceMenu();
+}
+
+/** Tenta todas as fontes de novo (botão "Tentar Novamente") */
+function retryAllSources() {
+  if (!_currentPlaybackSources || _currentPlaybackSources.length === 0) return;
+
+  // Resetar status de todas
+  _currentPlaybackSources.forEach(s => { s.status = 'pending'; });
+
+  const titleEl = el('playerStreamTitle');
+  const subEl = el('playerStreamSub');
+  _startSourcePlayback(0, titleEl?.textContent || '', subEl?.textContent || '', false);
+}
+
+/** Troca manualmente para uma fonte específica pelo índice */
+function switchPlaybackSource(index) {
+  if (index < 0 || index >= _currentPlaybackSources.length) return;
+  if (index === _currentSourceIndex && _currentPlaybackSources[index].status === 'ok') return;
+
+  // Resetar status se era falha (dar uma nova chance)
+  if (_currentPlaybackSources[index].status === 'failed') {
+    _currentPlaybackSources[index].status = 'pending';
+  }
+
+  const titleEl = el('playerStreamTitle');
+  const subEl = el('playerStreamSub');
+  _startSourcePlayback(index, titleEl?.textContent || '', subEl?.textContent || '', true);
+  closeSourceMenu();
+}
+
+// ─── Failover: Source Picker Pill e Menu ─────────────────────────────────────
+
+function _updateSourcePill() {
+  const pill = el('playerSourcePill');
+  if (!pill) return;
+
+  if (_currentPlaybackSources.length <= 1) {
+    pill.style.display = 'none';
+    return;
+  }
+
+  pill.style.display = 'inline-flex';
+  const src = _currentPlaybackSources[_currentSourceIndex];
+  const nameLabel = el('sourceNameLabel');
+  const countLabel = el('sourceCountLabel');
+  if (nameLabel) nameLabel.textContent = src?.serverName || `Fonte ${_currentSourceIndex + 1}`;
+  if (countLabel) countLabel.textContent = `${_currentSourceIndex + 1}/${_currentPlaybackSources.length}`;
+}
+
+function _updateSourceMenu() {
+  const list = el('sourceMenuList');
+  if (!list) return;
+
+  list.innerHTML = _currentPlaybackSources.map((src, i) => {
+    const isActive = i === _currentSourceIndex;
+    const isFailed = src.status === 'failed';
+    const isOk = src.status === 'ok';
+
+    const dotClass = isFailed ? 'failed' : (isOk ? 'ok' : 'pending');
+    const itemClass = `source-menu-item${isActive ? ' active' : ''}${isFailed ? ' failed' : ''}`;
+    const badge = isActive && isOk ? '<span class="source-item-badge playing">▶ Ativa</span>'
+      : isFailed ? '<span class="source-item-badge err">Falhou</span>'
+      : '';
+
+    return `
+      <button class="${itemClass}" onclick="switchPlaybackSource(${i})" ${isFailed && !isActive ? '' : ''}>
+        <span class="source-item-dot ${dotClass}"></span>
+        <div class="source-item-info">
+          <div class="source-item-name">${esc(src.serverName)}</div>
+          <div class="source-item-host">${esc(src.host || src.url.substring(0, 50))}</div>
+        </div>
+        ${badge}
+      </button>
+    `;
+  }).join('');
+}
+
+function toggleSourceMenu() {
+  const menu = el('playerSourceMenu');
+  const pill = el('playerSourcePill');
+  if (!menu) return;
+
+  const isOpen = menu.style.display !== 'none';
+  menu.style.display = isOpen ? 'none' : 'block';
+  if (pill) pill.classList.toggle('open', !isOpen);
+
+  if (!isOpen) _updateSourceMenu();
+}
+
+function closeSourceMenu() {
+  const menu = el('playerSourceMenu');
+  const pill = el('playerSourcePill');
+  if (menu) menu.style.display = 'none';
+  if (pill) pill.classList.remove('open');
+}
+
+/** Legacy: playStream para compatibilidade — usa playWithSources com fonte única */
+function playStream(url, title, subtitle) {
+  playWithSources([{ url, serverName: subtitle || 'Servidor', host: '' }], 0, title, subtitle);
+}
+
 /** Fecha o player e limpa a reprodução */
 function closePlayer() {
   const modal = el('playerModal');
   const video = el('mainVideoPlayer');
   const fallback = el('videoErrorFallback');
+  const banner = el('playerFailoverBanner');
+  const sourceMenu = el('playerSourceMenu');
+
+  // Limpar timer de failover
+  if (_failoverTimer) { clearTimeout(_failoverTimer); _failoverTimer = null; }
 
   if (video) {
     video.pause();
     video.removeAttribute('src');
     video.load();
+    video.onerror = null;
+    video.onended = null;
+    video.onplaying = null;
   }
   if (fallback) fallback.style.display = 'none';
+  if (banner) banner.style.display = 'none';
+  if (sourceMenu) sourceMenu.style.display = 'none';
   if (modal) modal.style.display = 'none';
   _currentStreamUrl = '';
+  _currentPlaybackSources = [];
+  _currentSourceIndex = 0;
 }
 
 /** Abre a URL atual em nova aba ou player padrão */
@@ -1472,7 +1817,7 @@ function renderHomeLibrary() {
       recentsGrid.innerHTML = recents.map((item, idx) => `
         <div class="home-card fx" tabindex="0" onclick="openLibraryItem(${idx}, 'rec')">
           <div class="home-card-poster">
-            ${item.cover_url ? `<img src="${esc(item.cover_url)}" alt="${esc(item.title)}" loading="lazy" onerror="this.parentElement.style.background='#1b1f26'">` : ''}
+            ${item.cover_url ? `<img src="${esc(item.cover_url)}" alt="${esc(item.title)}" loading="lazy" decoding="async" onerror="this.parentElement.style.background='#1b1f26'">` : ''}
             <span class="home-card-badge ${item.subInfo ? 'ep' : ''}">${esc(item.subInfo || typeLabel(item.type))}</span>
             <button class="home-card-remove-btn" tabindex="-1" onclick="removeRecent('${esc(item.title)}', event)" title="Remover do histórico">✕</button>
             <div class="home-card-play-overlay">
@@ -1500,7 +1845,7 @@ function renderHomeLibrary() {
       favGrid.innerHTML = favorites.map((item, idx) => `
         <div class="home-card fx" tabindex="0" onclick="openLibraryItem(${idx}, 'fav')">
           <div class="home-card-poster">
-            ${item.cover_url ? `<img src="${esc(item.cover_url)}" alt="${esc(item.title)}" loading="lazy" onerror="this.parentElement.style.background='#1b1f26'">` : ''}
+            ${item.cover_url ? `<img src="${esc(item.cover_url)}" alt="${esc(item.title)}" loading="lazy" decoding="async" onerror="this.parentElement.style.background='#1b1f26'">` : ''}
             <span class="home-card-badge">${esc(typeLabel(item.type))}</span>
             <button class="home-card-remove-btn" tabindex="-1" onclick="removeFavorite('${esc(item.title)}', event)" title="Remover dos favoritos">✕</button>
             <div class="home-card-play-overlay">
@@ -1534,10 +1879,425 @@ function openLibraryItem(idx, source) {
   } else {
     openDetailScreen(item);
   }
+}
+
+// ─── Batch Server Import ──────────────────────────────────────────────────────
+let _batchParsedServers = [];
+let _batchDebounceTimer = null;
+
+function handleBatchTextInput() {
+  clearTimeout(_batchDebounceTimer);
+  _batchDebounceTimer = setTimeout(() => {
+    const input = el('batchTextInput');
+    if (!input) return;
+    _batchParsedServers = parseBatchServerInput(input.value);
+    renderBatchPreview();
+  }, 150);
+}
+
+function handleBatchFileSelect(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+  readBatchFile(file);
+}
+
+function readBatchFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target?.result;
+    if (typeof content === 'string') {
+      const input = el('batchTextInput');
+      if (input) input.value = content;
+      _batchParsedServers = parseBatchServerInput(content);
+      renderBatchPreview();
+      showToast(`Arquivo "${file.name}" carregado (${_batchParsedServers.length} servidores).`);
+    }
+  };
+  reader.onerror = () => {
+    showToast('Erro ao ler o arquivo selecionado.');
+  };
+  reader.readAsText(file);
+}
+
+function renderBatchPreview() {
+  const container = el('batchPreviewContainer');
+  const listEl = el('batchPreviewList');
+  const badgeEl = el('batchCountBadge');
+  const progressBox = el('batchProgressBox');
+
+  if (!container || !listEl || !badgeEl) return;
+
+  if (progressBox) progressBox.style.display = 'none';
+
+  if (!_batchParsedServers || _batchParsedServers.length === 0) {
+    container.style.display = 'none';
+    listEl.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'flex';
+  const count = _batchParsedServers.length;
+  badgeEl.textContent = `✨ ${count} servidor${count > 1 ? 'es' : ''} identificado${count > 1 ? 's' : ''}`;
+
+  listEl.innerHTML = _batchParsedServers.map((srv, idx) => {
+    const isXtream = srv.serverType === 'xtream';
+    const meta = isXtream
+      ? `${srv.host} • Usuário: ${srv.username}`
+      : srv.m3uUrl;
+
+    return `
+      <div class="batch-item-card" id="batch-item-${idx}">
+        <span class="batch-item-badge ${srv.serverType}">${srv.serverType.toUpperCase()}</span>
+        <div class="batch-item-info">
+          <input type="text" class="batch-item-name-input fx" value="${esc(srv.name)}" oninput="updateBatchPreviewName(${idx}, this.value)" placeholder="Nome do servidor" title="Clique para editar o nome">
+          <div class="batch-item-meta mono" title="${esc(meta)}">${esc(meta)}</div>
+        </div>
+        <button class="batch-item-remove-btn fx" onclick="removeBatchPreviewItem(${idx})" title="Remover da lista">✕</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function updateBatchPreviewName(idx, newName) {
+  if (_batchParsedServers[idx]) {
+    _batchParsedServers[idx].name = newName.trim() || `Servidor ${idx + 1}`;
+  }
+}
+
+function removeBatchPreviewItem(idx) {
+  _batchParsedServers.splice(idx, 1);
+  renderBatchPreview();
+  if (_batchParsedServers.length === 0) {
+    clearBatchInput();
+  }
+}
+
+function clearBatchInput() {
+  _batchParsedServers = [];
+  const textInput = el('batchTextInput');
+  if (textInput) textInput.value = '';
+  const fileInput = el('batchFileInput');
+  if (fileInput) fileInput.value = '';
+  const container = el('batchPreviewContainer');
+  if (container) container.style.display = 'none';
+  const progressBox = el('batchProgressBox');
+  if (progressBox) progressBox.style.display = 'none';
+}
+
+async function importBatchServers() {
+  if (!_batchParsedServers || _batchParsedServers.length === 0) {
+    showToast('Nenhum servidor para importar.');
+    return;
+  }
+
+  const btnSync = el('btnBatchImportSync');
+  const progressBox = el('batchProgressBox');
+  const progressBar = el('batchProgressBar');
+  const progressText = el('batchProgressText');
+  const progressPct = el('batchProgressPct');
+
+  if (btnSync) btnSync.disabled = true;
+
+  if (progressBox) progressBox.style.display = 'flex';
+  if (progressText) progressText.textContent = `Cadastrando ${_batchParsedServers.length} servidores para validação...`;
+  if (progressBar) progressBar.style.width = '10%';
+  if (progressPct) progressPct.textContent = '10%';
+
+  try {
+    const res = await invoke('add_servers_batch', { servers: _batchParsedServers });
+    const createdServers = res.servers || [];
+
+    if (createdServers.length === 0) {
+      throw new Error('Nenhum servidor pôde ser criado.');
+    }
+
+    const total = createdServers.length;
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < total; i++) {
+      const srv = createdServers[i];
+      const pct = Math.round(15 + ((i + 1) / total) * 85);
+      if (progressBar) progressBar.style.width = `${pct}%`;
+      if (progressPct) progressPct.textContent = `${pct}%`;
+      if (progressText) progressText.textContent = `Sincronizando (${i + 1}/${total}): ${srv.name}...`;
+
+      try {
+        await invoke('sync_server', { serverId: srv.id, deleteOnError: true });
+        successCount++;
+      } catch (err) {
+        failedCount++;
+      }
+    }
+
+    if (progressBar) progressBar.style.width = '100%';
+    if (progressPct) progressPct.textContent = '100%';
+
+    if (successCount > 0) {
+      progressText.textContent = `✓ ${successCount} de ${total} sincronizados e salvos!` +
+        (failedCount > 0 ? ` (${failedCount} inválidos/com erro foram descartados)` : '');
+      showToast(`${successCount} servidor(es) salvos com sucesso!` + (failedCount > 0 ? ` (${failedCount} descartados)` : ''));
+    } else {
+      progressText.textContent = `✕ Nenhum dos ${total} servidores respondeu com sucesso (todos foram descartados).`;
+      showToast('Nenhum servidor sincronizou. Todos foram descartados.');
+    }
+
+    await loadServers();
+
+    setTimeout(() => {
+      clearBatchInput();
+      if (btnSync) btnSync.disabled = false;
+    }, 2000);
+
+  } catch (err) {
+    showToast('Erro na importação: ' + err);
+    if (progressText) progressText.textContent = 'Falha na importação: ' + err;
+    if (btnSync) btnSync.disabled = false;
+  }
+}
+
+/**
+ * Analisa o texto/linhas e retorna a lista estruturada de servidores
+ */
+function parseBatchServerInput(rawText) {
+  if (!rawText || !rawText.trim()) return [];
+  const text = rawText.trim();
+
+  // 1. JSON Array
+  if (text.startsWith('[') && text.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const results = [];
+        for (const item of parsed) {
+          if (!item) continue;
+          const mUrl = item.m3uUrl || item.m3u_url || item.url;
+          if (mUrl && (!item.username || !item.password)) {
+            results.push({
+              name: item.name || deriveNameFromUrl(mUrl),
+              serverType: 'm3u',
+              host: null,
+              port: null,
+              username: null,
+              password: null,
+              m3uUrl: String(mUrl).trim(),
+            });
+          } else if (item.host && item.username && item.password) {
+            results.push({
+              name: item.name || deriveNameFromUrl(item.host),
+              serverType: 'xtream',
+              host: String(item.host).trim(),
+              port: item.port ? String(item.port).trim() : null,
+              username: String(item.username).trim(),
+              password: String(item.password).trim(),
+              m3uUrl: null,
+            });
+          }
+        }
+        if (results.length > 0) return deduplicateNames(results);
+      }
+    } catch (e) {}
+  }
+
+  // 2. Análise linha a linha
+  const lines = text.split(/\r?\n/);
+  const results = [];
+  let pendingLabel = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    if (!line) continue;
+
+    // Linha de comentário (# Nome ou #EXTINF:-1,Nome)
+    if (line.startsWith('#')) {
+      if (line.toUpperCase().startsWith('#EXTM3U')) continue;
+      if (line.toUpperCase().startsWith('#EXTINF')) {
+        const parts = line.split(',');
+        if (parts.length > 1) pendingLabel = parts.slice(1).join(',').trim();
+      } else {
+        const cleanComment = line.replace(/^#+\s*/, '').trim();
+        if (cleanComment) pendingLabel = cleanComment;
+      }
+      continue;
+    }
+
+    let explicitName = pendingLabel;
+    pendingLabel = null;
+
+    // Prefixo "Nome | URL" ou "Nome - URL"
+    if (!explicitName) {
+      if (line.includes(' | http://') || line.includes(' | https://')) {
+        const split = line.split(/ \| (https?:\/\/)/i);
+        if (split.length >= 3) {
+          explicitName = split[0].trim();
+          line = split[1] + split.slice(2).join('');
+        }
+      } else if (line.includes(' - http://') || line.includes(' - https://')) {
+        const split = line.split(/ - (https?:\/\/)/i);
+        if (split.length >= 3) {
+          explicitName = split[0].trim();
+          line = split[1] + split.slice(2).join('');
+        }
+      }
+    }
+
+    // A. URL Xtream em qualquer parte da linha (suporta CSV, get.php, player_api.php, etc.)
+    const urlMatch = line.match(/(https?:\/\/[^\s,;"'|]+)/i);
+    if (urlMatch) {
+      const candidateUrl = urlMatch[1];
+      if (candidateUrl.includes('username=') || candidateUrl.includes('get.php') || candidateUrl.includes('player_api.php') || candidateUrl.includes('xmltv.php')) {
+        try {
+          const urlObj = new URL(candidateUrl);
+          const user = urlObj.searchParams.get('username') || urlObj.searchParams.get('user');
+          const pass = urlObj.searchParams.get('password') || urlObj.searchParams.get('pass');
+          if (user && pass) {
+            const host = urlObj.origin;
+            const name = explicitName || deriveNameFromUrl(host);
+            results.push({
+              name,
+              serverType: 'xtream',
+              host,
+              port: null,
+              username: user,
+              password: pass,
+              m3uUrl: null,
+            });
+            continue;
+          }
+        } catch (e) {}
+      }
+
+      // B. URL no formato de stream direto Xtream: http://host:port/live/user/pass/id.ts
+      const livePathMatch = candidateUrl.match(/^(https?:\/\/[^\/]+)\/(?:live|movie|series)\/([^\/]+)\/([^\/]+)\//i);
+      if (livePathMatch) {
+        const host = livePathMatch[1];
+        const user = livePathMatch[2];
+        const pass = livePathMatch[3];
+        const name = explicitName || deriveNameFromUrl(host);
+        results.push({
+          name,
+          serverType: 'xtream',
+          host,
+          port: null,
+          username: user,
+          password: pass,
+          m3uUrl: null,
+        });
+        continue;
+      }
+    }
+
+    // C. Formato delimitado (espaço, vírgula, ponto e vírgula, tabulação ou pipe)
+    // Ex: "http://host:8080 user pass Nome" ou "http://host:8080,user,pass,Nome"
+    const delims = ['\t', '|', ',', ';', ' '];
+    let matchedDelim = false;
+    for (const d of delims) {
+      if (line.includes(d)) {
+        const parts = line.split(d).map(p => p.trim()).filter(Boolean);
+        if (parts.length >= 3) {
+          const hostToken = parts.find(t => t.startsWith('http://') || t.startsWith('https://') || /^[a-zA-Z0-9.-]+:\d+$/.test(t));
+          if (hostToken) {
+            const hostIdx = parts.indexOf(hostToken);
+            let userToken, passToken, nameToken;
+
+            if (hostIdx === 0) {
+              userToken = parts[1];
+              passToken = parts[2];
+              nameToken = parts.slice(3).join(' ');
+            } else {
+              nameToken = parts.slice(0, hostIdx).join(' ');
+              userToken = parts[hostIdx + 1];
+              passToken = parts[hostIdx + 2];
+            }
+
+            if (userToken && passToken) {
+              let host = hostToken;
+              if (!host.startsWith('http://') && !host.startsWith('https://')) {
+                host = 'http://' + host;
+              }
+
+              const name = explicitName || nameToken || deriveNameFromUrl(host);
+              results.push({
+                name,
+                serverType: 'xtream',
+                host,
+                port: null,
+                username: userToken,
+                password: passToken,
+                m3uUrl: null,
+              });
+              matchedDelim = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (matchedDelim) continue;
+
+    // D. URL M3U simples
+    if (line.startsWith('http://') || line.startsWith('https://')) {
+      const cleanUrl = line.split(/\s+/)[0];
+      const name = explicitName || deriveNameFromUrl(cleanUrl);
+      results.push({
+        name,
+        serverType: 'm3u',
+        host: null,
+        port: null,
+        username: null,
+        password: null,
+        m3uUrl: cleanUrl,
+      });
+      continue;
+    }
+  }
+
+  return deduplicateNames(results);
+}
+
+function deriveNameFromUrl(urlStr) {
+  try {
+    const clean = urlStr.startsWith('http') ? urlStr : `http://${urlStr}`;
+    const parsed = new URL(clean);
+    let host = parsed.hostname.replace(/^www\./, '');
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') {
+      host += `:${parsed.port}`;
+    }
+    return host || 'Servidor IPTV';
+  } catch (e) {
+    return 'Servidor IPTV';
+  }
+}
+
+function deduplicateNames(list) {
+  const counts = {};
+  return list.map(item => {
+    const base = item.name.trim() || 'Servidor';
+    counts[base] = (counts[base] || 0) + 1;
+    if (counts[base] > 1) {
+      return { ...item, name: `${base} (${counts[base]})` };
+    }
+    return { ...item, name: base };
+  });
+}
+
 // Exposição global para integração com D-Pad e controles
 window.playPrevEpisode = playPrevEpisode;
 window.playNextEpisode = playNextEpisode;
 window.closePlayer = closePlayer;
 window.closePlayChoice = closePlayChoice;
 window.goBack = goBack;
-
+window.setAddMode = setAddMode;
+window.addServer = addServer;
+window.removeServer = removeServer;
+window.syncServer = syncServer;
+window.refreshAll = refreshAll;
+window.handleBatchTextInput = handleBatchTextInput;
+window.handleBatchFileSelect = handleBatchFileSelect;
+window.removeBatchPreviewItem = removeBatchPreviewItem;
+window.updateBatchPreviewName = updateBatchPreviewName;
+window.clearBatchInput = clearBatchInput;
+window.importBatchServers = importBatchServers;
+window.toggleSourceMenu = toggleSourceMenu;
+window.switchPlaybackSource = switchPlaybackSource;
+window.retryAllSources = retryAllSources;

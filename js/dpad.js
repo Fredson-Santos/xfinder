@@ -70,15 +70,17 @@
   function focusables() {
     const container = activeScreen();
     if (!container) return [];
-    return [...container.querySelectorAll(SEL)].filter(el => {
-      // Exclui botão de remover do card (ele não deve roubar foco D-pad)
-      if (el.classList.contains('home-card-remove-btn')) return false;
-      const r = el.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return false;
-      const style = window.getComputedStyle(el);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-      return true;
-    });
+    const elements = container.querySelectorAll(SEL);
+    const result = [];
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (el.classList.contains('home-card-remove-btn')) continue;
+      // Elementos ocultos por display:none ou ancestral oculto
+      if (el.offsetParent === null && el.style.position !== 'fixed') continue;
+      if (el.offsetWidth <= 0 || el.offsetHeight <= 0) continue;
+      result.push(el);
+    }
+    return result;
   }
 
   /** Retorna o bounding box com centros e dimensões. */

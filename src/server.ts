@@ -300,6 +300,45 @@ function setupServer(): void {
     res.json({ id });
   });
 
+  // POST /api/servers/batch
+  router.post('/servers/batch', (req, res) => {
+    const { servers: list } = req.body ?? {};
+    if (!Array.isArray(list) || list.length === 0) {
+      return void res.status(400).json({ error: 'Nenhum servidor fornecido' });
+    }
+
+    const createdServers: { id: number; name: string }[] = [];
+    db.exec('BEGIN');
+    try {
+      for (const item of list) {
+        if (!item.name || !item.serverType) continue;
+        dbRun(
+          `INSERT INTO servers (name, type, host, port, username, password, m3u_url, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+          [
+            item.name,
+            item.serverType,
+            item.host ?? null,
+            item.port ?? null,
+            item.username ?? null,
+            item.password ?? null,
+            item.m3uUrl ?? null,
+          ],
+        );
+        const id = lastInsertRowid();
+        createdServers.push({ id, name: item.name });
+      }
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      const msg = e instanceof Error ? e.message : String(e);
+      return void res.status(500).json({ error: 'Falha ao importar servidores: ' + msg });
+    }
+
+    saveDb();
+    res.json({ servers: createdServers, count: createdServers.length });
+  });
+
   // DELETE /api/servers/:id
   router.delete('/servers/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -311,6 +350,7 @@ function setupServer(): void {
   // POST /api/servers/:id/sync
   router.post('/servers/:id/sync', async (req, res) => {
     const id = parseInt(req.params.id, 10);
+    const deleteOnError = req.query.deleteOnError === 'true' || req.body?.deleteOnError === true;
     const server = dbGet(
       `SELECT id, name, type, host, port, username, password, m3u_url, expiry,
               active_connections, max_connections, status, last_sync
@@ -337,7 +377,11 @@ function setupServer(): void {
       saveDb();
       res.json({ message: result });
     } catch (e: unknown) {
-      dbRun(`UPDATE servers SET status = 'error', last_sync = strftime('%s','now') WHERE id = ?`, [id]);
+      if (deleteOnError) {
+        dbRun('DELETE FROM servers WHERE id = ?', [id]);
+      } else {
+        dbRun(`UPDATE servers SET status = 'error', last_sync = strftime('%s','now') WHERE id = ?`, [id]);
+      }
       saveDb();
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: msg });
