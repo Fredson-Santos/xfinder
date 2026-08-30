@@ -18,6 +18,11 @@
     <div class="topline">
       <div class="logo"><span class="dot"></span>XFinder</div>
       <div class="topline-actions">
+        <button class="icon-btn fx" id="btnDpad" onclick="toggleDpad()" title="Modo D-Pad (controle remoto)" aria-label="Alternar modo D-Pad" aria-pressed="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 2h8v6h6v8h-6v6H8v-6H2v-8h6z"/>
+          </svg>
+        </button>
         <button class="icon-btn fx" id="btnRefresh" onclick="refreshAll()" title="Sincronizar todos os servidores" aria-label="Sincronizar">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"></polyline>
@@ -53,6 +58,33 @@
     </div>
     <div id="resultsList"></div>
 
+    <!-- ── HOME LIBRARY (Favoritos e Recentes) ────────────────────────── -->
+    <div class="home-library" id="homeLibrary">
+      <!-- Seção Continuar Assistindo -->
+      <div class="home-shelf" id="recentSection" style="display:none">
+        <div class="home-shelf-header">
+          <div class="home-shelf-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <span>Continuar Assistindo</span>
+          </div>
+          <button class="home-shelf-clear-btn fx" onclick="clearRecentsHistory()" title="Limpar histórico recente">Limpar</button>
+        </div>
+        <div class="home-shelf-grid" id="recentsGrid"></div>
+      </div>
+
+      <!-- Seção Favoritos -->
+      <div class="home-shelf" id="favoritesSection" style="display:none">
+        <div class="home-shelf-header">
+          <div class="home-shelf-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+            <span>Meus Favoritos</span>
+            <span class="home-shelf-count mono" id="favoritesCount">0</span>
+          </div>
+        </div>
+        <div class="home-shelf-grid" id="favoritesGrid"></div>
+      </div>
+    </div>
+
     <div class="empty-state" id="emptyState" style="display:none">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
       <p>Nenhum resultado encontrado.</p>
@@ -61,7 +93,7 @@
     <div class="no-servers-state" id="noServersState" style="display:none">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
       <p>Nenhum servidor adicionado ainda.</p>
-      <button class="accent-btn" onclick="goTo('settings')">Adicionar servidor</button>
+      <button class="accent-btn fx" onclick="goTo('settings')">Adicionar servidor</button>
     </div>
   </div>
 
@@ -119,6 +151,102 @@
 
 </div><!-- /.app -->
 
+<!-- ── VIDEO PLAYER MODAL ────────────────────────────────────────────────── -->
+<div class="player-modal" id="playerModal" style="display:none" role="dialog" aria-modal="true">
+  <div class="player-backdrop" onclick="closePlayer()"></div>
+  <div class="player-container">
+    <div class="player-header">
+      <div class="player-title-info">
+        <span class="player-stream-title" id="playerStreamTitle">Reproduzindo</span>
+        <span class="player-stream-sub" id="playerStreamSub"></span>
+      </div>
+      <div class="player-actions">
+        <button class="player-action-btn fx" id="btnPrevEpisode" onclick="playPrevEpisode()" title="Episódio anterior (P / PageUp)" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          <span>Ep. Anterior</span>
+        </button>
+        <button class="player-action-btn fx" id="btnNextEpisode" onclick="playNextEpisode()" title="Próximo episódio (N / PageDown)" style="display:none">
+          <span>Próximo Ep.</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+        <button class="player-action-btn fx" id="btnExternalPlayer" onclick="openCurrentInExternal()" title="Abrir em nova aba / player externo">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          Abrir Externo
+        </button>
+        <button class="player-action-btn fx" onclick="copyCurrentStreamUrl()" title="Copiar link do stream">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          Copiar Link
+        </button>
+        <button class="player-close-btn fx" onclick="closePlayer()" title="Fechar player (ESC)" aria-label="Fechar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </div>
+    <div class="video-wrapper">
+      <video id="mainVideoPlayer" controls playsinline></video>
+      <div class="video-error-fallback" id="videoErrorFallback" style="display:none">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        <h3>Formato de stream não suportado nativamente pelo navegador</h3>
+        <p>Alguns codecs IPTV (ex: TS, AC3, MKV proprietários) requerem player externo como VLC ou MPV.</p>
+        <div class="fallback-actions">
+          <button class="accent-btn fx" onclick="openCurrentInExternal()">Abrir em Nova Aba / VLC</button>
+          <button class="copy-url-btn fx" onclick="copyCurrentStreamUrl()">Copiar Link do Stream</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── SELETOR DE REPRODUÇÃO (PLAYER OU ABA EXTERNA) ────────────────────── -->
+<div class="choice-modal" id="playChoiceModal" style="display:none" role="dialog" aria-modal="true">
+  <div class="choice-backdrop" onclick="closePlayChoice()"></div>
+  <div class="choice-container">
+    <div class="choice-header">
+      <div class="choice-badge">Opções de Reprodução</div>
+      <h3 class="choice-title" id="choiceModalTitle">Como deseja assistir?</h3>
+      <p class="choice-sub" id="choiceModalSub"></p>
+    </div>
+    <div class="choice-options">
+      <!-- Opção 1: Nova Aba / Player Externo -->
+      <button class="choice-card fx" id="btnChoiceExternal" onclick="confirmPlayChoice('external')">
+        <div class="choice-icon external">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+        </div>
+        <div class="choice-text">
+          <div class="choice-card-name">Abrir em Nova Aba / Externo</div>
+          <div class="choice-card-desc">Abre o stream em nova aba ou player do sistema (VLC, MPV, navegador).</div>
+        </div>
+      </button>
+
+      <!-- Opção 2: Player do Navegador -->
+      <button class="choice-card fx" id="btnChoiceWeb" onclick="confirmPlayChoice('web')">
+        <div class="choice-icon web">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div class="choice-text">
+          <div class="choice-card-name">Player no Navegador</div>
+          <div class="choice-card-desc">Assista aqui mesmo no player embutido do XFinder com tela cheia.</div>
+        </div>
+      </button>
+
+      <!-- Opção 3: Copiar Link -->
+      <button class="choice-card fx" id="btnChoiceCopy" onclick="confirmPlayChoice('copy')">
+        <div class="choice-icon copy">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+        </div>
+        <div class="choice-text">
+          <div class="choice-card-name">Copiar Link do Stream</div>
+          <div class="choice-card-desc">Copia o link direto do vídeo para colar em outro aplicativo.</div>
+        </div>
+      </button>
+    </div>
+    <div class="choice-footer">
+      <button class="choice-cancel-btn fx" onclick="closePlayChoice()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/dpad.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

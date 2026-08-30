@@ -1,33 +1,66 @@
 /**
- * XFinder — Electron Main Process
+ * XFinder — Web Server
  *
- * Usa sql.js (SQLite → WebAssembly) para zero compilação nativa.
- * Replica todos os 7 comandos que antes eram Tauri/Rust.
+ * Express server que expõe as mesmas 6 operações que eram IPC handlers
+ * no Electron, agora como endpoints REST.
+ * Usa sql.js (SQLite via WebAssembly) — mesma lib do projeto original,
+ * sem compilação nativa.
+ *
+ * Variáveis de ambiente:
+ *   PORT     — porta HTTP (padrão: 3000)
+ *   HOST     — interface de rede (padrão: 0.0.0.0)
+ *   DATA_DIR — diretório do banco de dados (padrão: ./data)
  */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import initSqlJs, { Database } from 'sql.js';
 import * as m3u from './m3u';
 import * as xtream from './xtream';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+const app  = express();
+const PORT = parseInt(process.env.PORT ?? '3000', 10);
+const HOST = process.env.HOST ?? '0.0.0.0';
 
-interface Server {
-  id:                 number;
-  name:               string;
-  type:               string;
-  host:               string | null;
-  port:               string | null;
-  username:           string | null;
-  password:           string | null;
-  m3u_url:            string | null;
-  expiry:             string | null;
-  active_connections: number | null;
-  max_connections:    number | null;
-  status:             string;
-  last_sync:          number | null;
+// ─── DB state ─────────────────────────────────────────────────────────────────
+
+let db: Database;
+let dbPath: string;
+
+function saveDb(): void {
+  const data = db.export();
+  fs.writeFileSync(dbPath, Buffer.from(data));
+}
+
+// ─── DB helpers (mesma API do main.ts original) ───────────────────────────────
+
+type SqlParam = string | number | null | undefined;
+
+function dbAll(sql: string, params: SqlParam[] = []): Record<string, unknown>[] {
+  const stmt = db.prepare(sql);
+  const rows: Record<string, unknown>[] = [];
+  stmt.bind(params as any);
+  while (stmt.step()) rows.push(stmt.getAsObject() as Record<string, unknown>);
+  stmt.free();
+  return rows;
+}
+
+function dbGet(sql: string, params: SqlParam[] = []): Record<string, unknown> | undefined {
+  const stmt = db.prepare(sql);
+  stmt.bind(params as any);
+  const row = stmt.step() ? (stmt.getAsObject() as Record<string, unknown>) : undefined;
+  stmt.free();
+  return row;
+}
+
+function dbRun(sql: string, params: SqlParam[] = []): void {
+  db.run(sql, params as any);
+}
+
+function lastInsertRowid(): number {
+  const res = db.exec('SELECT last_insert_rowid()');
+  return (res[0]?.values[0]?.[0] as number) ?? 0;
 }
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
@@ -64,74 +97,48 @@ CREATE TABLE IF NOT EXISTS media (
   raw_url             TEXT
 );
 
-
+CREATE INDEX IF NOT EXISTS idx_media_title  ON media(title);
+CREATE INDEX IF NOT EXISTS idx_media_server ON media(server_id);
 `;
-
-// ─── DB state ────────────────────────────────────────────────────────────────
-
-let db: Database;
-let dbPath: string;
-
-/** Persiste o banco em disco (sql.js é in-memory; precisa serializar). */
-function saveDb(): void {
-  const data = db.export();
-  fs.writeFileSync(dbPath, Buffer.from(data));
-}
-
-// ─── DB helpers (API similar a better-sqlite3) ───────────────────────────────
-
-type SqlParam = string | number | null | undefined;
-
-function dbAll(sql: string, params: SqlParam[] = []): Record<string, unknown>[] {
-  const stmt = db.prepare(sql);
-  const rows: Record<string, unknown>[] = [];
-  stmt.bind(params as any);
-  while (stmt.step()) rows.push(stmt.getAsObject() as Record<string, unknown>);
-  stmt.free();
-  return rows;
-}
-
-function dbGet(sql: string, params: SqlParam[] = []): Record<string, unknown> | undefined {
-  const stmt = db.prepare(sql);
-  stmt.bind(params as any);
-  const row = stmt.step() ? (stmt.getAsObject() as Record<string, unknown>) : undefined;
-  stmt.free();
-  return row;
-}
-
-function dbRun(sql: string, params: SqlParam[] = []): void {
-  db.run(sql, params as any);
-}
-
-function lastInsertRowid(): number {
-  const res = db.exec('SELECT last_insert_rowid()');
-  return (res[0]?.values[0]?.[0] as number) ?? 0;
-}
 
 // ─── DB init ─────────────────────────────────────────────────────────────────
 
 async function initDb(): Promise<void> {
-  const userDataPath = app.getPath('userData');
-  fs.mkdirSync(userDataPath, { recursive: true });
-  dbPath = path.join(userDataPath, 'xfinder.db');
+  const dataDir = process.env.DATA_DIR ?? path.join(__dirname, '..', 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  dbPath = path.join(dataDir, 'xfinder.db');
 
-  // Localiza o arquivo WASM do sql.js
-  const wasmPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'sql-wasm.wasm')
-    : path.join(app.getAppPath(), 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
-
+  // Localiza o WASM do sql.js
+  const wasmPath = path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
   const SQL = await initSqlJs({ locateFile: () => wasmPath });
 
   db = fs.existsSync(dbPath)
     ? new SQL.Database(fs.readFileSync(dbPath))
     : new SQL.Database();
 
-  try { db.exec("DROP TABLE IF EXISTS media_fts"); } catch (e) {}
   db.exec(SCHEMA);
   saveDb();
 }
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface Server {
+  id:                 number;
+  name:               string;
+  type:               string;
+  host:               string | null;
+  port:               string | null;
+  username:           string | null;
+  password:           string | null;
+  m3u_url:            string | null;
+  expiry:             string | null;
+  active_connections: number | null;
+  max_connections:    number | null;
+  status:             string;
+  last_sync:          number | null;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function unixTsToDate(s: string): string {
   const ts = parseInt(s, 10);
@@ -140,11 +147,11 @@ function unixTsToDate(s: string): string {
 }
 
 function yearFromStr(s: string): number | null {
-  const y = parseInt(s.split('-')[0], 10);
+  const y = parseInt((s ?? '').split('-')[0], 10);
   return isNaN(y) ? null : y;
 }
 
-// ─── Xtream sync ─────────────────────────────────────────────────────────────
+// ─── Xtream sync ──────────────────────────────────────────────────────────────
 
 async function syncXtream(server: Server): Promise<string> {
   const host = server.host ?? '';
@@ -152,7 +159,6 @@ async function syncXtream(server: Server): Promise<string> {
   const user = server.username ?? '';
   const pass = server.password ?? '';
 
-  // Autenticar e obter metadados da conta
   const info = await xtream.getInfo(host, port, user, pass);
 
   if (info.user_info.exp_date) {
@@ -165,7 +171,6 @@ async function syncXtream(server: Server): Promise<string> {
     );
   }
 
-  // Buscar VOD, séries e canais ao vivo em paralelo
   const [vodRes, seriesRes, liveRes] = await Promise.allSettled([
     xtream.getVod(host, port, user, pass),
     xtream.getSeries(host, port, user, pass),
@@ -176,7 +181,6 @@ async function syncXtream(server: Server): Promise<string> {
   const series = seriesRes.status === 'fulfilled' ? seriesRes.value : [];
   const live   = liveRes.status   === 'fulfilled' ? liveRes.value   : [];
 
-  // Substituir entradas em uma única transação (atomicamente)
   db.exec('BEGIN');
   try {
     dbRun('DELETE FROM media WHERE server_id = ?', [server.id]);
@@ -217,12 +221,11 @@ async function syncXtream(server: Server): Promise<string> {
   }
 
   saveDb();
-
   const total = vod.length + series.length + live.length;
   return `Synced ${total} items — Movies: ${vod.length}, Series: ${series.length}, Live: ${live.length}`;
 }
 
-// ─── M3U sync ────────────────────────────────────────────────────────────────
+// ─── M3U sync ─────────────────────────────────────────────────────────────────
 
 async function syncM3u(server: Server): Promise<string> {
   const url = server.m3u_url;
@@ -235,8 +238,6 @@ async function syncM3u(server: Server): Promise<string> {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
     content = await res.text();
-  } catch (e) {
-    throw new Error(`Download error: ${e}`);
   } finally {
     clearTimeout(timer);
   }
@@ -263,24 +264,32 @@ async function syncM3u(server: Server): Promise<string> {
   return `Synced ${entries.length} items from M3U`;
 }
 
-// ─── IPC Handlers ────────────────────────────────────────────────────────────
+// ─── Express setup ────────────────────────────────────────────────────────────
 
-function registerHandlers(): void {
+function setupServer(): void {
+  app.use(express.json());
 
-  // list_servers
-  ipcMain.handle('list_servers', () =>
-    dbAll(`SELECT id, name, type, host, port, username, password, m3u_url, expiry,
-                  active_connections, max_connections, status, last_sync
-           FROM servers ORDER BY id`),
-  );
+  // Serve os arquivos estáticos do frontend
+  const appRoot = path.join(__dirname, '..');
+  app.use(express.static(appRoot, { index: 'index.html' }));
 
-  // add_server
-  ipcMain.handle('add_server', (_, { name, serverType, host, port, username, password, m3uUrl }: {
-    name: string; serverType: string;
-    host?: string | null; port?: string | null;
-    username?: string | null; password?: string | null;
-    m3uUrl?: string | null;
-  }) => {
+  const router = express.Router();
+
+  // GET /api/servers
+  router.get('/servers', (_req, res) => {
+    res.json(dbAll(
+      `SELECT id, name, type, host, port, username, password, m3u_url, expiry,
+              active_connections, max_connections, status, last_sync
+       FROM servers ORDER BY id`,
+    ));
+  });
+
+  // POST /api/servers
+  router.post('/servers', (req, res) => {
+    const { name, serverType, host, port, username, password, m3uUrl } = req.body ?? {};
+    if (!name || !serverType) {
+      return void res.status(400).json({ error: 'name e serverType são obrigatórios' });
+    }
     dbRun(
       `INSERT INTO servers (name, type, host, port, username, password, m3u_url, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
@@ -288,53 +297,59 @@ function registerHandlers(): void {
     );
     const id = lastInsertRowid();
     saveDb();
-    return id;
+    res.json({ id });
   });
 
-  // remove_server
-  ipcMain.handle('remove_server', (_, { serverId }: { serverId: number }) => {
-    dbRun('DELETE FROM servers WHERE id = ?', [serverId]);
+  // DELETE /api/servers/:id
+  router.delete('/servers/:id', (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    dbRun('DELETE FROM servers WHERE id = ?', [id]);
     saveDb();
+    res.json({ ok: true });
   });
 
-  // sync_server
-  ipcMain.handle('sync_server', async (_, { serverId }: { serverId: number }) => {
+  // POST /api/servers/:id/sync
+  router.post('/servers/:id/sync', async (req, res) => {
+    const id = parseInt(req.params.id, 10);
     const server = dbGet(
       `SELECT id, name, type, host, port, username, password, m3u_url, expiry,
               active_connections, max_connections, status, last_sync
        FROM servers WHERE id = ?`,
-      [serverId],
+      [id],
     ) as Server | undefined;
 
-    if (!server) throw new Error(`Server ${serverId} not found`);
+    if (!server) return void res.status(404).json({ error: `Servidor ${id} não encontrado` });
 
-    dbRun("UPDATE servers SET status = 'syncing' WHERE id = ?", [serverId]);
+    dbRun("UPDATE servers SET status = 'syncing' WHERE id = ?", [id]);
     saveDb();
 
     try {
-      const result = server.type === 'xtream'
-        ? await syncXtream(server)
-        : server.type === 'm3u'
-          ? await syncM3u(server)
-          : (() => { throw new Error(`Unknown server type: ${server.type}`); })();
+      let result: string;
+      if (server.type === 'xtream') {
+        result = await syncXtream(server);
+      } else if (server.type === 'm3u') {
+        result = await syncM3u(server);
+      } else {
+        throw new Error(`Tipo de servidor desconhecido: ${server.type}`);
+      }
 
-      dbRun(`UPDATE servers SET status = 'ok', last_sync = strftime('%s','now') WHERE id = ?`, [serverId]);
+      dbRun(`UPDATE servers SET status = 'ok', last_sync = strftime('%s','now') WHERE id = ?`, [id]);
       saveDb();
-      return result;
-    } catch (e) {
-      dbRun(`UPDATE servers SET status = 'error', last_sync = strftime('%s','now') WHERE id = ?`, [serverId]);
+      res.json({ message: result });
+    } catch (e: unknown) {
+      dbRun(`UPDATE servers SET status = 'error', last_sync = strftime('%s','now') WHERE id = ?`, [id]);
       saveDb();
-      throw e;
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
     }
   });
 
-  // search
-  ipcMain.handle('search', (_, { query }: { query: string }) => {
-    const q = (query ?? '').trim();
-    if (!q) return [];
+  // GET /api/search?q=...
+  router.get('/search', (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    if (!q) return void res.json([]);
 
     const likeQuery = `%${q}%`;
-
     const rows = dbAll(`
       SELECT
         m.title               AS m_title,
@@ -360,7 +375,6 @@ function registerHandlers(): void {
       LIMIT 300
     `, [likeQuery]);
 
-    // Agrupa títulos iguais de múltiplos servidores
     const map = new Map<string, {
       title: string; type: string; year: number | null;
       cover_url: string | null; external_id: string | null;
@@ -379,7 +393,7 @@ function registerHandlers(): void {
           year:        (row['m_year']        as number | null) ?? null,
           cover_url:   (row['m_cover_url']   as string | null) ?? null,
           external_id: (row['m_external_id'] as string | null) ?? null,
-          servers: [],
+          servers:     [],
         });
       }
 
@@ -398,69 +412,42 @@ function registerHandlers(): void {
       });
     }
 
-    return [...map.values()];
+    res.json([...map.values()]);
   });
 
-  // get_episodes
-  ipcMain.handle('get_episodes', async (_, {
-    serverType, host, port, username, password, seriesId,
-  }: {
-    serverType: string;
-    host?:     string; port?:     string;
-    username?: string; password?: string;
-    seriesId:  string;
-  }) => {
+  // GET /api/episodes?serverType=&host=&port=&username=&password=&seriesId=
+  router.get('/episodes', async (req, res) => {
+    const { serverType, host, port, username, password, seriesId } =
+      req.query as Record<string, string>;
+
     if (serverType !== 'xtream') {
-      throw new Error('Episode breakdown only available for Xtream servers');
+      return void res.status(400).json({ error: 'Detalhes de episódios disponíveis apenas para servidores Xtream' });
     }
-    return xtream.getSeriesInfo(
-      host ?? '', port ?? '', username ?? '', password ?? '', seriesId,
-    );
+    try {
+      const data = await xtream.getSeriesInfo(
+        host ?? '', port ?? '', username ?? '', password ?? '', seriesId ?? '',
+      );
+      res.json(data);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      res.status(500).json({ error: msg });
+    }
   });
 
-  // open_stream
-  ipcMain.handle('open_stream', async (_, { url }: { url: string }) => {
-    await shell.openExternal(url);
+  app.use('/api', router);
+
+  app.listen(PORT, HOST, () => {
+    console.log(`\n  ✦ XFinder rodando em http://localhost:${PORT}`);
+    console.log(`  Banco de dados: ${dbPath}`);
+    console.log(`  Pressione Ctrl+C para parar.\n`);
   });
 }
 
-// ─── Window ───────────────────────────────────────────────────────────────────
+// ─── Boot ─────────────────────────────────────────────────────────────────────
 
-function createWindow(): void {
-  const appRoot   = app.getAppPath();
-  const iconPath  = path.join(appRoot, 'src-tauri', 'icons', 'icon.ico');
-
-  const win = new BrowserWindow({
-    width:     960,
-    height:    720,
-    minWidth:  420,
-    minHeight: 500,
-    center:    true,
-    title:     'XFinder',
-    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
-    webPreferences: {
-      preload:          path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration:  false,
-    },
+initDb()
+  .then(setupServer)
+  .catch(err => {
+    console.error('Falha ao iniciar XFinder:', err);
+    process.exit(1);
   });
-
-  win.loadFile(path.join(appRoot, 'index.html'));
-  win.setMenuBarVisibility(false);
-}
-
-// ─── App lifecycle ────────────────────────────────────────────────────────────
-
-app.whenReady().then(async () => {
-  await initDb();
-  registerHandlers();
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});

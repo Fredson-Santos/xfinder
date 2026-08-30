@@ -1,21 +1,21 @@
 {
   "name": "xfinder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "main": "dist/main.js",
+  "main": "dist/server.js",
   "scripts": {
-    "build:ts": "esbuild src/main.ts src/preload.ts --bundle --platform=node --outdir=dist --external:electron --external:sql.js",
-    "dev": "npm run build:ts && electron .",
-    "build": "npm run build:ts && electron-builder"
+    "build:ts": "esbuild src/server.ts --bundle --platform=node --outdir=dist --external:sql.js",
+    "dev": "npm run build:ts && node dist/server.js",
+    "start": "node dist/server.js"
   },
   "dependencies": {
+    "express": "^4",
     "sql.js": "^1.12"
   },
   "devDependencies": {
+    "@types/express": "^4",
     "@types/node": "^20",
-    "electron": "^31",
-    "electron-builder": "^24",
-    "esbuild": "^0.21",
+    "esbuild": "^0.28.1",
     "typescript": "^5"
   }
 }

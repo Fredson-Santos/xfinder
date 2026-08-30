@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+
+# Local Database runtime files
+data/*.db
+data/xfinder.db
+
+# Logs & OS metadata
+*.log
+.DS_Store
+Thumbs.db
