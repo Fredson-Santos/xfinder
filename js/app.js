@@ -35,6 +35,9 @@ async function invoke(cmd, args = {}) {
     case 'add_servers_batch':
       return api('POST', '/servers/batch', args);
 
+    case 'sync_servers_batch':
+      return api('POST', '/servers/sync-batch', args);
+
     case 'remove_server':
       return api('DELETE', `/servers/${args.serverId}`);
 
@@ -861,14 +864,36 @@ async function syncServer(id, removeOnFail = false) {
   return { success, message: resultMsg };
 }
 
+async function runConcurrently(items, concurrency, fn) {
+  const queue = items.map((item, index) => ({ item, index }));
+  const results = [];
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (queue.length > 0) {
+      const { item, index } = queue.shift();
+      try {
+        const res = await fn(item, index);
+        results[index] = { success: true, res };
+      } catch (err) {
+        results[index] = { success: false, err };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function refreshAll() {
   const btn = el('btnRefresh');
   btn.classList.add('spinning');
   btn.disabled = true;
 
   const pending = servers.filter(s => s.status !== 'syncing');
-  for (const s of pending) {
-    await syncServer(s.id);
+  if (pending.length > 0) {
+    showToast(`Sincronizando ${pending.length} servidores em paralelo...`);
+    await runConcurrently(pending, 6, async (s) => {
+      await syncServer(s.id);
+    });
+    showToast('Sincronização de servidores concluída!');
   }
 
   btn.classList.remove('spinning');
@@ -2043,21 +2068,23 @@ async function importBatchServers() {
     const total = createdServers.length;
     let successCount = 0;
     let failedCount = 0;
+    let finishedCount = 0;
 
-    for (let i = 0; i < total; i++) {
-      const srv = createdServers[i];
-      const pct = Math.round(15 + ((i + 1) / total) * 85);
-      if (progressBar) progressBar.style.width = `${pct}%`;
-      if (progressPct) progressPct.textContent = `${pct}%`;
-      if (progressText) progressText.textContent = `Sincronizando (${i + 1}/${total}): ${srv.name}...`;
-
+    // Sincronização paralela em lote com 6 workers simultâneos (Goroutine-backed)
+    await runConcurrently(createdServers, 6, async (srv) => {
       try {
         await invoke('sync_server', { serverId: srv.id, deleteOnError: true });
         successCount++;
       } catch (err) {
         failedCount++;
+      } finally {
+        finishedCount++;
+        const pct = Math.round(15 + (finishedCount / total) * 85);
+        if (progressBar) progressBar.style.width = `${pct}%`;
+        if (progressPct) progressPct.textContent = `${pct}%`;
+        if (progressText) progressText.textContent = `Sincronizando em paralelo (${finishedCount}/${total}): ${srv.name}...`;
       }
-    }
+    });
 
     if (progressBar) progressBar.style.width = '100%';
     if (progressPct) progressPct.textContent = '100%';

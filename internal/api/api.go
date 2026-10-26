@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"xfinder/internal/db"
@@ -181,19 +182,11 @@ func (a *APIHandler) CleanupExpired(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *APIHandler) SyncServer(w http.ResponseWriter, r *http.Request, idStr string) {
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		sendError(w, http.StatusBadRequest, "ID inválido")
-		return
-	}
-
-	deleteOnError := r.URL.Query().Get("deleteOnError") == "true"
-
+// SyncServerInternal executa a lógica de sincronização para um servidor
+func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, error) {
 	server, err := a.database.GetServerByID(id)
 	if err != nil || server == nil {
-		sendError(w, http.StatusNotFound, fmt.Sprintf("Servidor %d não encontrado", id))
-		return
+		return "", fmt.Errorf("servidor %d não encontrado", id)
 	}
 
 	a.database.UpdateServerStatus(id, "syncing")
@@ -266,22 +259,113 @@ func (a *APIHandler) SyncServer(w http.ResponseWriter, r *http.Request, idStr st
 		} else {
 			a.database.UpdateServerStatus(id, "error")
 		}
-		a.proxy.InvalidateCache()
-		sendError(w, http.StatusInternalServerError, syncErr.Error())
-		return
+		return "", syncErr
 	}
 
 	if err := a.database.ReplaceMedia(id, mediaList); err != nil {
 		a.database.UpdateServerStatus(id, "error")
-		sendError(w, http.StatusInternalServerError, "Falha ao salvar mídia: "+err.Error())
-		return
+		return "", fmt.Errorf("falha ao salvar mídia: %w", err)
 	}
 
 	a.database.UpdateServerStatus(id, "ok")
+	return fmt.Sprintf("Sincronizado com sucesso! %d itens catalogados.", len(mediaList)), nil
+}
+
+func (a *APIHandler) SyncServer(w http.ResponseWriter, r *http.Request, idStr string) {
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		sendError(w, http.StatusBadRequest, "ID inválido")
+		return
+	}
+
+	deleteOnError := r.URL.Query().Get("deleteOnError") == "true"
+	msg, syncErr := a.SyncServerInternal(id, deleteOnError)
 	a.proxy.InvalidateCache()
 
-	sendJSON(w, http.StatusOK, map[string]string{
-		"message": fmt.Sprintf("Sincronizado com sucesso! %d itens catalogados.", len(mediaList)),
+	if syncErr != nil {
+		sendError(w, http.StatusInternalServerError, syncErr.Error())
+		return
+	}
+
+	sendJSON(w, http.StatusOK, map[string]string{"message": msg})
+}
+
+type SyncBatchRequest struct {
+	ServerIDs     []int64 `json:"serverIds"`
+	DeleteOnError bool    `json:"deleteOnError"`
+	Concurrency   int     `json:"concurrency"`
+}
+
+type SyncBatchResultItem struct {
+	ID      int64  `json:"id"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// SyncServersBatch sincroniza múltiplos servidores simultaneamente com Goroutines
+func (a *APIHandler) SyncServersBatch(w http.ResponseWriter, r *http.Request) {
+	var req SyncBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, http.StatusBadRequest, "JSON inválido")
+		return
+	}
+
+	if len(req.ServerIDs) == 0 {
+		sendError(w, http.StatusBadRequest, "Nenhum servidor fornecido")
+		return
+	}
+
+	concurrency := req.Concurrency
+	if concurrency <= 0 || concurrency > 20 {
+		concurrency = 8 // Concorrência padrão equilibrada
+	}
+
+	sem := make(chan struct{}, concurrency)
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results []SyncBatchResultItem
+		success int
+		failed  int
+	)
+
+	for _, srvID := range req.ServerIDs {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			msg, err := a.SyncServerInternal(id, req.DeleteOnError)
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failed++
+				results = append(results, SyncBatchResultItem{
+					ID:      id,
+					Success: false,
+					Message: err.Error(),
+				})
+			} else {
+				success++
+				results = append(results, SyncBatchResultItem{
+					ID:      id,
+					Success: true,
+					Message: msg,
+				})
+			}
+		}(srvID)
+	}
+
+	wg.Wait()
+	a.proxy.InvalidateCache()
+
+	sendJSON(w, http.StatusOK, map[string]interface{}{
+		"total":   len(req.ServerIDs),
+		"success": success,
+		"failed":  failed,
+		"results": results,
 	})
 }
 
@@ -354,6 +438,20 @@ func (a *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 		}
 		if r.Method == http.MethodPost {
 			a.AddServersBatch(w, r)
+			return
+		}
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/servers/sync-batch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == http.MethodPost {
+			a.SyncServersBatch(w, r)
 			return
 		}
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)

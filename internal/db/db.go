@@ -24,12 +24,15 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("falha ao criar pasta de dados: %w", err)
 	}
 
-	conn, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)")
+	conn, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		return nil, fmt.Errorf("falha ao abrir sqlite: %w", err)
 	}
 
-	conn.SetMaxOpenConns(1) // Recomendado para SQLite para garantir integridade e evitar database locked
+	// Pool de conexões otimizado para WAL mode (permite múltiplas leituras concorrentes em paralelo)
+	conn.SetMaxOpenConns(15)
+	conn.SetMaxIdleConns(5)
+	conn.SetConnMaxLifetime(30 * time.Minute)
 
 	d := &DB{conn: conn}
 	if err := d.initSchema(); err != nil {
@@ -80,7 +83,9 @@ func (d *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_media_server ON media(server_id);
 	CREATE INDEX IF NOT EXISTS idx_media_type ON media(type);
 	CREATE INDEX IF NOT EXISTS idx_media_type_cat ON media(type, category);
+	CREATE INDEX IF NOT EXISTS idx_media_type_title ON media(type, title);
 	CREATE INDEX IF NOT EXISTS idx_media_title ON media(title);
+	CREATE INDEX IF NOT EXISTS idx_servers_status ON servers(status);
 	`
 	_, err := d.conn.Exec(schema)
 	return err
@@ -285,6 +290,16 @@ func (d *DB) ReplaceMedia(serverID int64, mediaList []models.Media) error {
 	return tx.Commit()
 }
 
+type rawSearchRow struct {
+	title, mType                                                           string
+	year                                                                   sql.NullInt64
+	coverURL, externalID                                                   sql.NullString
+	serverID                                                               int64
+	serverName, serverType                                                 string
+	host, port, username, password, streamID, containerExt, rawURL, expiry sql.NullString
+}
+
+// SearchMedia realiza busca concorrente usando Goroutines por tipo de mídia
 func (d *DB) SearchMedia(query string, limit int) ([]models.SearchResult, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -293,90 +308,121 @@ func (d *DB) SearchMedia(query string, limit int) ([]models.SearchResult, error)
 		limit = 300
 	}
 
-	likeQuery := "%" + strings.TrimSpace(query) + "%"
-	rows, err := d.conn.Query(`
-		SELECT m.title, m.type, m.year, m.cover_url, m.external_id,
-		       s.id, s.name, s.type, s.host, s.port, s.username, s.password,
-		       m.stream_id, m.container_extension, m.raw_url, s.expiry
-		FROM media m
-		JOIN servers s ON m.server_id = s.id
-		WHERE m.title LIKE ? AND s.status = 'ok'
-		LIMIT ?
-	`, likeQuery, limit)
-	if err != nil {
-		return nil, err
+	cleanQuery := strings.TrimSpace(query)
+	if cleanQuery == "" {
+		return []models.SearchResult{}, nil
 	}
-	defer rows.Close()
 
+	likeQuery := "%" + cleanQuery + "%"
+	types := []string{"movie", "series", "live"}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		allRows []rawSearchRow
+	)
+
+	// Dispara 3 Goroutines simultâneas (uma para cada tipo de mídia)
+	typeLimit := limit / len(types)
+	if typeLimit < 80 {
+		typeLimit = 100
+	}
+
+	for _, mType := range types {
+		wg.Add(1)
+		go func(t string) {
+			defer wg.Done()
+
+			rows, err := d.conn.Query(`
+				SELECT m.title, m.type, m.year, m.cover_url, m.external_id,
+				       s.id, s.name, s.type, s.host, s.port, s.username, s.password,
+				       m.stream_id, m.container_extension, m.raw_url, s.expiry
+				FROM media m
+				JOIN servers s ON m.server_id = s.id
+				WHERE m.type = ? AND m.title LIKE ? AND s.status = 'ok'
+				LIMIT ?
+			`, t, likeQuery, typeLimit)
+			if err != nil {
+				return
+			}
+			defer rows.Close()
+
+			var localRows []rawSearchRow
+			for rows.Next() {
+				var r rawSearchRow
+				if err := rows.Scan(
+					&r.title, &r.mType, &r.year, &r.coverURL, &r.externalID,
+					&r.serverID, &r.serverName, &r.serverType, &r.host, &r.port, &r.username, &r.password,
+					&r.streamID, &r.containerExt, &r.rawURL, &r.expiry,
+				); err == nil {
+					localRows = append(localRows, r)
+				}
+			}
+
+			if len(localRows) > 0 {
+				mu.Lock()
+				allRows = append(allRows, localRows...)
+				mu.Unlock()
+			}
+		}(mType)
+	}
+
+	wg.Wait()
+
+	// Consolidação rápida dos resultados agregados por título e tipo
 	resultsMap := make(map[string]*models.SearchResult)
 	var orderedKeys []string
 
-	for rows.Next() {
-		var title, mType string
-		var year sql.NullInt64
-		var coverURL, externalID sql.NullString
-		var serverID int64
-		var serverName, serverType string
-		var host, port, username, password, streamID, containerExt, rawURL, expiry sql.NullString
-
-		err := rows.Scan(
-			&title, &mType, &year, &coverURL, &externalID,
-			&serverID, &serverName, &serverType, &host, &port, &username, &password,
-			&streamID, &containerExt, &rawURL, &expiry,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		key := strings.ToLower(title) + "|" + mType
+	for _, r := range allRows {
+		key := strings.ToLower(r.title) + "|" + r.mType
 		sr, exists := resultsMap[key]
 		if !exists {
 			sr = &models.SearchResult{
-				Title: title,
-				Type:  mType,
+				Title: r.title,
+				Type:  r.mType,
 			}
-			if year.Valid {
-				y := int(year.Int64)
+			if r.year.Valid {
+				y := int(r.year.Int64)
 				sr.Year = &y
 			}
-			if coverURL.Valid {
-				sr.CoverURL = &coverURL.String
+			if r.coverURL.Valid {
+				sr.CoverURL = &r.coverURL.String
 			}
-			if externalID.Valid {
-				sr.ExternalID = &externalID.String
+			if r.externalID.Valid {
+				sr.ExternalID = &r.externalID.String
 			}
 			resultsMap[key] = sr
 			orderedKeys = append(orderedKeys, key)
 		}
 
 		srv := models.SearchResultServer{
-			ServerID:   serverID,
-			ServerName: serverName,
-			ServerType: serverType,
+			ServerID:   r.serverID,
+			ServerName: r.serverName,
+			ServerType: r.serverType,
 		}
-		if host.Valid {
-			srv.Host = &host.String
+		if r.host.Valid {
+			srv.Host = &r.host.String
 		}
-		if port.Valid {
-			srv.Port = &port.String
+		if r.port.Valid {
+			srv.Port = &r.port.String
 		}
-		if username.Valid {
-			srv.Username = &username.String
+		if r.username.Valid {
+			srv.Username = &r.username.String
 		}
-		if password.Valid {
-			srv.Password = &password.String
+		if r.password.Valid {
+			srv.Password = &r.password.String
 		}
-		if streamID.Valid {
-			srv.StreamID = &streamID.String
+		if r.streamID.Valid {
+			srv.StreamID = &r.streamID.String
 		}
-		if containerExt.Valid {
-			srv.ContainerExtension = &containerExt.String
+		if r.containerExt.Valid {
+			srv.ContainerExtension = &r.containerExt.String
 		}
-		if rawURL.Valid {
-			srv.RawURL = &rawURL.String
+		if r.rawURL.Valid {
+			srv.RawURL = &r.rawURL.String
 		}
-		if expiry.Valid {
-			srv.Expiry = &expiry.String
+		if r.expiry.Valid {
+			srv.Expiry = &r.expiry.String
 		}
 
 		sr.Servers = append(sr.Servers, srv)
