@@ -1,32 +1,30 @@
-# ---------- Stage 1: build ----------
-FROM node:20-alpine AS builder
+# ---------- Stage 1: build Go ----------
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+# Dependências Go
+COPY go.mod go.sum ./
+RUN go mod download
 
-COPY tsconfig.json ./
-COPY src ./src
+# Código fonte
+COPY cmd ./cmd
+COPY internal ./internal
+
+# Compilação com flags de otimização de tamanho
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/xfinder ./cmd/server
+
+# ---------- Stage 2: runtime enxuto ----------
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /app
+
+# Copia binário e frontend web
+COPY --from=builder /app/xfinder /app/xfinder
 COPY css ./css
 COPY js ./js
-COPY index.html ./
-
-RUN npm run build:ts
-
-# ---------- Stage 2: runtime ----------
-FROM node:20-alpine
-
-ENV NODE_ENV=production
-WORKDIR /app
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/css ./css
-COPY --from=builder /app/js ./js
-COPY --from=builder /app/index.html ./index.html
+COPY index.html ./index.html
 
 RUN mkdir -p /app/data
 ENV PORT=3000 \
@@ -35,4 +33,4 @@ ENV PORT=3000 \
 
 EXPOSE 3000
 
-CMD ["node", "dist/server.js"]
+CMD ["/app/xfinder"]

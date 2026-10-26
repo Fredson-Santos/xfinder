@@ -74,8 +74,37 @@ let currentResult    = null;        // SearchResult currently open
 let currentSeason    = 1;
 let screenStack      = ['home'];
 
+// ─── Theme Management (Minimalist Precision UI) ──────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('xfinder-theme') || 'dark';
+  applyTheme(saved);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('xfinder-theme', theme);
+  const darkIcon = document.querySelector('.theme-icon-dark');
+  const lightIcon = document.querySelector('.theme-icon-light');
+  if (darkIcon && lightIcon) {
+    if (theme === 'dark') {
+      darkIcon.style.display = 'block';
+      lightIcon.style.display = 'none';
+    } else {
+      darkIcon.style.display = 'none';
+      lightIcon.style.display = 'block';
+    }
+  }
+}
+
+window.toggleTheme = function () {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+};
+
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
+  initTheme();
   await loadServers();
   setupSearch();
   setupKeyboard();

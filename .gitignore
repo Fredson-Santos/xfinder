@@ -1,14 +1,26 @@
-# Dependencies
-node_modules/
-
-# Build artifacts
-dist/
+# Binaries
+xfinder
+xfinder.exe
+*.exe
 
 # Local Database runtime files
-data/*.db
-data/xfinder.db
+data/*.db*
 
 # Logs & OS metadata
 *.log
 .DS_Store
 Thumbs.db
+
+# Environment & Telegram session files
+.env
+*.session
+*.session-journal
+data/*.session
+data/*.session-journal
+__pycache__/
+*.pyc
+*.tar.gz
+
+# Legacy
+node_modules/
+dist/
