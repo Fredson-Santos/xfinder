@@ -24,15 +24,20 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("falha ao criar pasta de dados: %w", err)
 	}
 
-	conn, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)")
+	// mmap_size: leituras via cache do SO, compartilhado entre as conexões. Faz
+	// diferença grande quando data/ é uma pasta do Windows montada no Docker
+	// (cada leitura de disco atravessa a ponte Windows→WSL): a busca por um
+	// termo raro, que percorre o índice de títulos inteiro, cai de ~1,3s para ~0,14s.
+	conn, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=mmap_size(268435456)&_pragma=cache_size(-16384)")
 	if err != nil {
 		return nil, fmt.Errorf("falha ao abrir sqlite: %w", err)
 	}
 
 	// Pool de conexões otimizado para WAL mode (permite múltiplas leituras concorrentes em paralelo)
 	conn.SetMaxOpenConns(15)
-	conn.SetMaxIdleConns(5)
-	conn.SetConnMaxLifetime(30 * time.Minute)
+	// Conexões ficam abertas: cada uma mantém o próprio cache de páginas
+	conn.SetMaxIdleConns(15)
+	conn.SetConnMaxLifetime(0)
 
 	d := &DB{conn: conn}
 	if err := d.initSchema(); err != nil {
