@@ -1,13 +1,17 @@
 services:
   xfinder:
-    build: .
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: xfinder:latest
     container_name: xfinder
+    environment:
+      - PORT=2332
+      - HOST=0.0.0.0
+      - DATA_DIR=/app/data
+      - WEB_DIR=/app/web
     ports:
-      - "3000:3000"
+      - "2332:2332"
     volumes:
-      - xfinder-data:/app/data
+      - ./data:/app/data
     restart: unless-stopped
-
-volumes:
-  xfinder-data:

@@ -1,26 +1,42 @@
-# Binaries
+# Go Binaries & Compilations
 xfinder
 xfinder.exe
+backend/xfinder
+backend/xfinder.exe
 *.exe
 
-# Local Database runtime files
-data/*.db*
+# Runtime Data (SQLite, Sessions, Dumps)
+data/*
+!data/.gitkeep
 
-# Logs & OS metadata
-*.log
-.DS_Store
-Thumbs.db
-
-# Environment & Telegram session files
+# Environment & Credentials
 .env
 *.session
 *.session-journal
-data/*.session
-data/*.session-journal
-__pycache__/
-*.pyc
-*.tar.gz
 
-# Legacy
-node_modules/
-dist/
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Android TV App & Gradle
+android-tv/.gradle/
+android-tv/.kotlin/
+android-tv/build/
+android-tv/app/build/
+android-tv/local.properties
+*.apk
+*.aab
+*.idsig
+
+# System & IDE
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.bak
+
+# Painel web (Svelte + Vite)
+web/node_modules/
+web/dist/
