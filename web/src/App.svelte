@@ -10,6 +10,7 @@
   import Settings from './pages/Settings.svelte';
   import Player from './components/Player.svelte';
   import Icon from './components/Icon.svelte';
+  import SearchBar from './components/SearchBar.svelte';
 
   let page = $derived.by(() => {
     const p = route.path;
@@ -39,9 +40,9 @@
 <header class="topbar">
   <div class="container topbar-inner">
     <a class="logo" href="#/" onclick={(e) => { e.preventDefault(); navigate('/'); }}>
-      <span class="logo-dot"></span>XFinder
+      <span class="logo-dot"></span><span class="logo-text">XFinder</span>
     </a>
-    <div class="spacer"></div>
+    <div class="search"><SearchBar /></div>
     <button class="gear" class:on={page.name === 'settings'} onclick={() => navigate('/config/servidores')}
             aria-label="Configurações" title="Configurações">
       <Icon name="gear" size={20} />
@@ -69,8 +70,17 @@
 
 <style>
   .topbar { border-bottom: 1px solid var(--border); background: var(--bg); }
-  .topbar-inner { display: flex; align-items: center; height: 64px; }
-  .spacer { flex: 1; }
+  /* logo | busca centralizada | configurações */
+  .topbar-inner {
+    display: grid; grid-template-columns: 1fr minmax(0, 560px) 1fr;
+    align-items: center; gap: 16px; height: 64px;
+  }
+  .search { min-width: 0; }
+  .gear { justify-self: end; }
+  @media (max-width: 640px) {
+    .topbar-inner { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
+    .logo-text { display: none; }
+  }
   .logo {
     display: flex; align-items: center; gap: 10px;
     font-size: 18px; font-weight: 800; letter-spacing: -0.02em;

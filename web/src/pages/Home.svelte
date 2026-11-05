@@ -3,7 +3,8 @@
   import { untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { route, navigate, href } from '../lib/router.svelte.js';
-  import { servers, okServers } from '../lib/servers.svelte.js';
+  import { servers } from '../lib/servers.svelte.js';
+  import { searchState } from '../lib/search.svelte.js';
   import { library, removeRecent, clearRecents, WATCHED_PCT } from '../lib/library.svelte.js';
   import { groupResults } from '../lib/streams.js';
   import { rememberItem } from '../lib/items.js';
@@ -12,24 +13,18 @@
   import Cover from '../components/Cover.svelte';
   import Icon from '../components/Icon.svelte';
 
-  const SEARCH_DEBOUNCE_MS = 350;
-
-  let input = $state(route.query.q ?? '');
   let results = $state([]);
   let loading = $state(false);
   let typeFilter = $state('all');
   let searchedFor = $state('');
-  let debounce;
   let token = 0;
 
   let q = $derived((route.query.q ?? '').trim());
-  let activeCount = $derived(okServers().length);
 
   // A busca acompanha a URL (?q=...): Voltar/F5 restauram os resultados
   $effect(() => {
     const query = q;
     untrack(() => {
-      if (input.trim() !== query && document.activeElement?.id !== 'search') input = query;
       if (query.length >= 2) runSearch(query);
       else { results = []; searchedFor = ''; }
     });
@@ -51,21 +46,9 @@
     }
   }
 
-  function onInput() {
-    clearTimeout(debounce);
-    debounce = setTimeout(() => setQuery(input.trim()), SEARCH_DEBOUNCE_MS);
-  }
-
-  function setQuery(value) {
-    if (value === q) return;
-    // Primeira busca cria uma entrada no histórico; refinamentos substituem
-    navigate(href('/', { q: value }), { replace: !!q && !!value });
-  }
-
-  function onKeydown(e) {
-    if (e.key === 'Enter') { clearTimeout(debounce); setQuery(input.trim()); }
-    if (e.key === 'Escape' && input) { e.stopPropagation(); input = ''; setQuery(''); }
-  }
+  // A barra de busca (no header) mostra o indicador de carregamento
+  $effect(() => { searchState.loading = loading; });
+  $effect(() => () => { searchState.loading = false; });
 
   const counts = $derived({
     all: results.length,
@@ -115,18 +98,6 @@
 </script>
 
 <main class="container home">
-  <section class="search">
-    <label for="search" class="search-label">
-      Buscar em <strong>{plural(activeCount, 'servidor', 'servidores')}</strong>
-    </label>
-    <div class="search-box">
-      <Icon name="search" size={18} />
-      <input id="search" type="search" bind:value={input} oninput={onInput} onkeydown={onKeydown}
-             placeholder="Filme, série ou canal…" autocomplete="off" spellcheck="false" />
-      {#if loading}<span class="spinner"></span>{/if}
-    </div>
-  </section>
-
   {#if servers.loaded && servers.list.length === 0}
     <div class="empty">
       <Icon name="layers" size={36} stroke={1.6} />
@@ -236,17 +207,6 @@
   .home { padding-top: 40px; padding-bottom: 80px; display: flex; flex-direction: column; gap: 44px; }
   .muted { color: var(--muted); font-size: 13px; }
 
-  .search { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
-  .search-label { font-size: 13px; color: var(--muted); }
-  .search-label strong { color: var(--text); }
-  .search-box {
-    display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 18px;
-    border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface-2);
-    color: var(--muted);
-  }
-  .search-box:focus-within { border-color: var(--accent); }
-  .search-box input { flex: 1; height: 100%; border: none; outline: none; background: none; font-size: 16px; color: var(--text); }
-  .search-box input::placeholder { color: var(--faint); }
 
   .results { display: flex; flex-direction: column; gap: 16px; }
   .results-head { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
