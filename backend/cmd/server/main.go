@@ -21,7 +21,7 @@ import (
 
 func main() {
 	portStr := os.Getenv("PORT")
-	port := 3000
+	port := 2332
 	if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
 		port = p
 	}

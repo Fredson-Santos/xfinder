@@ -12,7 +12,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-API_BASE = "http://localhost:3000/api"
+API_BASE = "http://localhost:2332/api"
 VALIDATED_JSON = r"c:\Users\Fred\Projetos\XFinder\data\validated_accounts.json"
 
 def post_json(endpoint, data):

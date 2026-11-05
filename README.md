@@ -57,11 +57,11 @@ npm install
 npm run build        # gera web/dist
 ```
 
-Para desenvolver com recarga automática (com o servidor Go rodando na porta 3000):
+Para desenvolver com recarga automática (com o servidor Go rodando na porta 2332):
 
 ```bash
 cd web
-npm run dev          # http://localhost:5173 (a API é redirecionada para :3000)
+npm run dev          # http://localhost:5173 (a API é redirecionada para :2332)
 ```
 
 ### 2. Servidor Go (Nativo)
@@ -85,9 +85,9 @@ go run ./cmd/server
 
 O servidor estará acessível em:
 
-- **Painel Web**: [http://localhost:3000](http://localhost:3000)
-- **Xtream Codes (Smarters/TiviMate)**: `http://SEU_IP:3000` (Usuário: `xfinder` | Senha: `xfinder`)
-- **Playlist M3U**: `http://SEU_IP:3000/playlist.m3u`
+- **Painel Web**: [http://localhost:2332](http://localhost:2332)
+- **Xtream Codes (Smarters/TiviMate)**: `http://SEU_IP:2332` (Usuário: `xfinder` | Senha: `xfinder`)
+- **Playlist M3U**: `http://SEU_IP:2332/playlist.m3u`
 
 ---
 
@@ -129,14 +129,14 @@ Para abrir e compilar:
 
 | Variável             | Padrão                       | Descrição                                              |
 | :-------------------- | :---------------------------- | :------------------------------------------------------- |
-| `PORT`              | `3000`                      | Porta HTTP do servidor Go                                |
+| `PORT`              | `2332`                      | Porta HTTP do servidor Go                                |
 | `HOST`              | `0.0.0.0`                   | Interface de rede (0.0.0.0 para acesso local e Wi-Fi)    |
 | `DATA_DIR`          | `./data`                    | Diretório onde o banco SQLite (`xfinder.db`) é salvo |
 | `WEB_DIR`           | `./web/dist`                | Build do Painel Web (cai para `./web` se não existir)  |
 | `TELEGRAM_API_ID`   | -                             | API ID da aplicação Telegram (my.telegram.org)         |
 | `TELEGRAM_API_HASH` | -                             | API Hash da aplicação Telegram                         |
 | `TELEGRAM_CHANNEL`  | -                             | Canal monitorado (@canal ou link)                        |
-| `XFINDER_API_URL`   | `http://localhost:3000/api` | Endpoint da API do XFinder para importações            |
+| `XFINDER_API_URL`   | `http://localhost:2332/api` | Endpoint da API do XFinder para importações            |
 
 ---
 
@@ -145,4 +145,4 @@ Para abrir e compilar:
 - **Nome da Conexão**: `XFinder`
 - **Nome de Usuário**: `xfinder`
 - **Senha**: `xfinder`
-- **URL do Servidor**: `http://IP_DO_SERVIDOR:3000` *(ex: `http://192.168.15.158:3000`)*
+- **URL do Servidor**: `http://IP_DO_SERVIDOR:2332` *(ex: `http://192.168.15.158:2332`)*
