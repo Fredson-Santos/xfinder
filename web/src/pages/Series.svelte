@@ -46,26 +46,41 @@
     untrack(() => load(it));
   });
 
+  /** Respostas de get_series_info por servidor (reaproveitadas no failover). */
+  const fetches = new Map();
+  const fetchEpisodes = (occ) => {
+    const k = `${occ.server_id}|${occ.series_id}`;
+    if (!fetches.has(k)) {
+      const p = api.getEpisodes(occ, occ.series_id);
+      p.catch(() => fetches.delete(k)); // erro não fica em cache
+      fetches.set(k, p);
+    }
+    return fetches.get(k);
+  };
+
+  /**
+   * Consulta todos os servidores em paralelo e usa o primeiro que devolver
+   * episódios — antes era um por vez, e cada servidor fora do ar segurava a
+   * página por ~20s antes de tentar o próximo.
+   */
   async function load(it) {
     loadError = '';
     if (!it || !providers.length) { data = null; loading = false; return; }
     if (episodeCache.has(it.key)) { data = episodeCache.get(it.key); loading = false; return; }
     loading = true;
-    for (const occ of providers) {
-      try {
-        const res = await api.getEpisodes(occ, occ.series_id);
-        if (res?.episodes && Object.keys(res.episodes).length) {
-          const entry = { ...res, provider: occ };
-          episodeCache.set(it.key, entry);
-          data = entry;
-          loading = false;
-          return;
-        }
-      } catch (err) {
-        loadError = err.message;
-      }
+    const attempts = providers.map((occ) => fetchEpisodes(occ).then((res) => {
+      if (!res?.episodes || !Object.keys(res.episodes).length) throw new Error('Servidor sem episódios para esta série');
+      return { ...res, provider: occ };
+    }));
+    let entry = null;
+    try {
+      entry = await Promise.any(attempts);
+    } catch (err) {
+      loadError = err.errors?.at(-1)?.message ?? err.message;
     }
-    data = null;
+    if (item !== it) return; // trocou de série enquanto carregava
+    if (entry) episodeCache.set(it.key, entry);
+    data = entry;
     loading = false;
   }
 
@@ -220,7 +235,7 @@
         name: occ.server_name,
         host: serverHost(occ),
         resolve: async () => {
-          const res = await api.getEpisodes(occ, occ.series_id);
+          const res = await fetchEpisodes(occ);
           const match = findEpisode(res, ep.season, ep.episode);
           if (!match) throw new Error('episódio não existe neste servidor');
           return episodeUrl(occ, match);

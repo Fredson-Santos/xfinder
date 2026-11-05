@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -19,6 +20,10 @@ import (
 var defaultClient = &http.Client{
 	Timeout: 45 * time.Second,
 	Transport: &http.Transport{
+		// Servidor fora do ar deve falhar rápido: sem isto a conexão fica
+		// pendurada até o timeout do SO (~21s no Windows) antes de dar erro.
+		DialContext:         (&net.Dialer{Timeout: 6 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout: 8 * time.Second,
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
