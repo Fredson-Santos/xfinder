@@ -21,6 +21,7 @@ type hostAccount struct {
 }
 
 type hostGroups struct {
+	gen      uint64                  // geração do banco em que foi montado
 	reps     []int64                 // uma conta por host (a de catálogo mais completo)
 	accounts map[int64][]hostAccount // representante → contas do grupo (representante primeiro)
 }
@@ -54,12 +55,14 @@ func HostKey(host, port string) string {
 
 // invalidateGroups descarta o agrupamento em cache; chamado por toda escrita
 // que muda servidores, status ou catálogos.
-func (d *DB) invalidateGroups() { d.groups.Store(nil) }
+// A geração evita que uma leitura feita durante a escrita (leituras não travam)
+// deixe em cache um agrupamento já desatualizado.
+func (d *DB) invalidateGroups() { d.groupsGen.Add(1); d.groups.Store(nil) }
 
 // loadHostGroups devolve o agrupamento atual (em cache até a próxima escrita).
-// Deve ser chamado com d.mu já travado (leitura).
 func (d *DB) loadHostGroups() (*hostGroups, error) {
-	if g := d.groups.Load(); g != nil {
+	gen := d.groupsGen.Load()
+	if g := d.groups.Load(); g != nil && g.gen == gen {
 		return g, nil
 	}
 
@@ -90,7 +93,7 @@ func (d *DB) loadHostGroups() (*hostGroups, error) {
 		return nil, err
 	}
 
-	g := &hostGroups{accounts: map[int64][]hostAccount{}}
+	g := &hostGroups{gen: gen, accounts: map[int64][]hostAccount{}}
 	for _, accs := range byKey {
 		// Representante: catálogo mais completo; empate → vence mais tarde; depois menor id.
 		// As demais seguem por vencimento (mais longo primeiro) — ordem do failover.
@@ -115,6 +118,8 @@ func (d *DB) loadHostGroups() (*hostGroups, error) {
 	}
 	sort.Slice(g.reps, func(i, j int) bool { return g.reps[i] < g.reps[j] })
 
-	d.groups.Store(g)
+	if d.groupsGen.Load() == gen {
+		d.groups.Store(g)
+	}
 	return g, nil
 }

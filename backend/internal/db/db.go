@@ -15,9 +15,13 @@ import (
 )
 
 type DB struct {
-	conn   *sql.DB
-	mu     sync.RWMutex
-	groups atomic.Pointer[hostGroups] // contas agrupadas por host (ver hostgroups.go)
+	conn *sql.DB
+	// wmu serializa só as escritas. Leituras não travam: em WAL o SQLite lê um
+	// snapshot consistente mesmo durante uma escrita (ex.: sync de um catálogo
+	// grande, que leva dezenas de segundos), então a busca não fica esperando.
+	wmu       sync.Mutex
+	groups    atomic.Pointer[hostGroups] // contas agrupadas por host (ver hostgroups.go)
+	groupsGen atomic.Uint64              // muda a cada escrita; invalida groups
 }
 
 func Open(dbPath string) (*DB, error) {
@@ -101,8 +105,6 @@ func (d *DB) initSchema() error {
 }
 
 func (d *DB) GetServers() ([]models.Server, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(`
 		SELECT id, name, type, host, port, username, password, m3u_url, expiry,
@@ -138,8 +140,6 @@ func (d *DB) GetServers() ([]models.Server, error) {
 }
 
 func (d *DB) GetServerByID(id int64) (*models.Server, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	var s models.Server
 	var lastSync sql.NullInt64
@@ -161,8 +161,8 @@ func (d *DB) GetServerByID(id int64) (*models.Server, error) {
 }
 
 func (d *DB) InsertServer(s *models.Server) (int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	res, err := d.conn.Exec(`
@@ -176,8 +176,8 @@ func (d *DB) InsertServer(s *models.Server) (int64, error) {
 }
 
 func (d *DB) DeleteServer(id int64) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	tx, err := d.conn.Begin()
@@ -197,8 +197,8 @@ func (d *DB) DeleteServer(id int64) error {
 }
 
 func (d *DB) UpdateServerStatus(id int64, status string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	_, err := d.conn.Exec("UPDATE servers SET status = ?, last_sync = strftime('%s','now') WHERE id = ?", status, id)
@@ -206,8 +206,8 @@ func (d *DB) UpdateServerStatus(id int64, status string) error {
 }
 
 func (d *DB) UpdateServerStats(id int64, expiry *string, activeCons, maxCons *int) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	_, err := d.conn.Exec(
@@ -218,8 +218,8 @@ func (d *DB) UpdateServerStats(id int64, expiry *string, activeCons, maxCons *in
 }
 
 func (d *DB) CleanExpiredServers() (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	rows, err := d.conn.Query("SELECT id, expiry FROM servers WHERE expiry IS NOT NULL")
@@ -273,8 +273,8 @@ func (d *DB) CleanExpiredServers() (int, error) {
 }
 
 func (d *DB) ReplaceMedia(serverID int64, mediaList []models.Media) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
 	tx, err := d.conn.Begin()
@@ -333,8 +333,6 @@ func (d *DB) SearchMedia(query string, limit int) ([]models.SearchResult, error)
 
 // SearchMediaTypes é como SearchMedia, mas restringe a busca aos tipos informados (nil = todos)
 func (d *DB) SearchMediaTypes(query string, limit int, onlyTypes []string) ([]models.SearchResult, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	if limit <= 0 {
 		limit = 300
@@ -477,8 +475,6 @@ func nullStr(v sql.NullString) *string {
 
 // GetDistinctCategories obtém a lista de categorias ordenadas para um determinado tipo
 func (d *DB) GetDistinctCategories(mediaType string) ([]string, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(`
 		SELECT DISTINCT category FROM media 
@@ -512,8 +508,6 @@ type StreamItemRow struct {
 
 // GetStreamsForProxy busca as streams para o proxy Xtream
 func (d *DB) GetStreamsForProxy(mediaType string, categoryName string, deduplicate bool) ([]StreamItemRow, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	var query string
 	var args []interface{}
@@ -599,8 +593,6 @@ type StreamPlaybackInfo struct {
 
 // GetStreamPlaybackInfo retorna os dados completos necessários para tocar uma stream
 func (d *DB) GetStreamPlaybackInfo(mediaID int64) (*StreamPlaybackInfo, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	var info StreamPlaybackInfo
 	var streamID, ext, rawURL, host, port, user, pass sql.NullString
@@ -646,8 +638,6 @@ func (d *DB) GetStreamPlaybackInfo(mediaID int64) (*StreamPlaybackInfo, error) {
 
 // FindAlternativeSources busca outros servidores online que possuem a mesma mídia (para Failover instantâneo)
 func (d *DB) FindAlternativeSources(title string, mediaType string, excludeServerID int64) ([]StreamPlaybackInfo, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(`
 		SELECT m.id, m.title, m.type, m.stream_id, m.container_extension, m.raw_url,
