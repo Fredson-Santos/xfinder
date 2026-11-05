@@ -7,6 +7,7 @@
   import { api } from '../lib/api.js';
   import { daysUntil, formatNumber, plural } from '../lib/format.js';
   import { toast } from '../lib/toast.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import Icon from './Icon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import AddServerDrawer from './AddServerDrawer.svelte';
@@ -58,6 +59,23 @@
   function hostOf(s) {
     if (s.type === 'm3u') return s.m3u_url || '';
     return (s.host || '') + (s.port && !String(s.host).includes(':' + s.port) ? ':' + s.port : '');
+  }
+
+  /** Link M3U da lista: o próprio link (M3U) ou o get.php do painel (Xtream). */
+  function m3uLink(s) {
+    if (s.type === 'm3u') return s.m3u_url || '';
+    if (!s.host || !s.username || !s.password) return '';
+    let base = String(s.host).trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(base)) base = 'http://' + base;
+    if (s.port && !/:\d+$/.test(base)) base += ':' + s.port;
+    const qs = new URLSearchParams({ username: s.username, password: s.password, type: 'm3u_plus', output: 'ts' });
+    return `${base}/get.php?${qs}`;
+  }
+
+  function copyM3u(s) {
+    const url = m3uLink(s);
+    if (!url) { toast('Esta lista não tem link M3U.'); return; }
+    copyText(url, 'Link M3U copiado!');
   }
 
   function expiryLabel(s) {
@@ -184,6 +202,8 @@
           <td class="num actions">
             <button class="btn btn-sm btn-icon" onclick={() => sync([row.id])} disabled={row.kind === 'syncing'}
                     aria-label="Sincronizar {row.name}" title="Sincronizar"><Icon name="sync" size={14} /></button>
+            <button class="btn btn-sm btn-icon" onclick={() => copyM3u(row)}
+                    aria-label="Copiar link M3U de {row.name}" title="Copiar link M3U"><Icon name="copy" size={14} /></button>
             <button class="btn btn-sm btn-icon" onclick={() => (confirmIds = [row.id])}
                     aria-label="Remover {row.name}" title="Remover"><Icon name="trash" size={14} /></button>
           </td>
