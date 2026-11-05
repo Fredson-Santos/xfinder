@@ -24,6 +24,7 @@
     .then(([a, h]) => ({ Artplayer: a.default, Hls: h.default })));
 
   let host = $state();  // onde o ArtPlayer é montado
+  let playerEl = $state(); // container persistente: é ele que entra em tela cheia
   let park;            // guarda os layers enquanto não há instância
   let topbarEl, nextEl, menuEl;
 
@@ -40,6 +41,7 @@
   let allFailed = $state(false);
   let nextDismissed = $state(false);
   let menuOpen = $state(false);
+  let isFs = $state(false);
 
   let source = $derived(req?.sources[index]);
   let isSeries = $derived(req?.type === 'series');
@@ -51,6 +53,40 @@
   $effect(() => {
     document.documentElement.style.overflow = req ? 'hidden' : '';
   });
+
+  // A tela cheia é aplicada ao container `.player`, e não ao elemento do ArtPlayer:
+  // a instância é recriada a cada episódio/fonte, e remover o elemento em tela
+  // cheia faz o navegador sair dela.
+  $effect(() => {
+    const sync = () => {
+      isFs = !!document.fullscreenElement && document.fullscreenElement === playerEl;
+      art?.controls?.update?.(fsControl());
+    };
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  });
+
+  const FS_ON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+  const FS_OFF = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+
+  function fsControl() {
+    return {
+      name: 'xf-fullscreen', index: 70, position: 'right',
+      tooltip: isFs ? 'Sair da tela cheia (F)' : 'Tela cheia (F)',
+      html: isFs ? FS_OFF : FS_ON,
+      click: toggleFullscreen,
+    };
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {});
+    } else if (playerEl?.requestFullscreen) {
+      playerEl.requestFullscreen().catch((err) => console.warn('Tela cheia negada:', err));
+    } else if (art) {
+      art.fullscreen = !art.fullscreen; // fallback (ex.: iOS, só o <video> entra em tela cheia)
+    }
+  }
 
   // ─── Sessões ──────────────────────────────────────────────────────────────
   $effect(() => {
@@ -167,7 +203,9 @@
     if (req.sources.length > 1) {
       controls.push(control('xf-src', 4, `Fonte ${index + 1}/${req.sources.length}`, 'Trocar servidor', () => (menuOpen = !menuOpen)));
     }
+    controls.push(fsControl());
 
+    Artplayer.DBCLICK_FULLSCREEN = false; // tratado em bind() → toggleFullscreen
     return new Artplayer({
       container: host,
       url,
@@ -181,7 +219,7 @@
       playbackRate: true,
       aspectRatio: true,
       pip: true,
-      fullscreen: true,
+      fullscreen: false, // substituído pelo controle xf-fullscreen
       fullscreenWeb: false,
       miniProgressBar: true,
       hotkey: true,
@@ -219,6 +257,7 @@
 
   function bind(a, i, resumeAt) {
     lastSave = 0;
+    a.on('dblclick', () => { if (!a.constructor.utils?.isMobile) toggleFullscreen(); });
     a.on('ready', () => {
       statuses[i] = 'ok';
       if (resumeAt > 5 && req?.type !== 'live') {
@@ -281,7 +320,9 @@
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'Escape') {
       if (menuOpen) { menuOpen = false; return; }
-      if (!art?.fullscreen) { e.preventDefault(); close(); }
+      if (!isFs && !art?.fullscreen) { e.preventDefault(); close(); }
+    } else if (e.key === 'f' || e.key === 'F') {
+      toggleFullscreen();
     } else if (e.key === 's' || e.key === 'S') {
       if (isSeries && settings.skipIntro) skipIntro();
     } else if (e.key === 'n' || e.key === 'N') {
@@ -340,7 +381,7 @@
 </div>
 
 {#if req}
-  <div class="player" role="dialog" aria-modal="true" aria-label="Player: {req.title}">
+  <div class="player" bind:this={playerEl} role="dialog" aria-modal="true" aria-label="Player: {req.title}">
     <div class="host" bind:this={host}></div>
 
     {#if allFailed}
