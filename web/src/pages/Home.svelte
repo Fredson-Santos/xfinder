@@ -84,12 +84,18 @@
     navigate(pathFor(item));
   }
 
-  /** Card de "Continuar assistindo": abre já reproduzindo. */
+  /**
+   * Card de "Continuar assistindo": abre já reproduzindo. A página de detalhes
+   * entra no histórico antes do player, para que fechar o player volte para
+   * ela (e não para a tela inicial).
+   */
   function resume(item) {
     rememberItem(item);
     if (item.type === 'series' && item.season && item.episode) {
+      navigate(href(pathFor(item), { t: item.season }));
       navigate(href(pathFor(item), { t: item.season, play: `${item.season}-${item.episode}` }));
     } else if (item.type !== 'series') {
+      navigate(pathFor(item));
       navigate(href(pathFor(item), { play: 1 }));
     } else {
       navigate(pathFor(item));
