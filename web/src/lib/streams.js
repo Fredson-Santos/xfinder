@@ -6,13 +6,25 @@ import { slugify } from './format.js';
 
 /** URL de reprodução de uma ocorrência (servidor) de um item. */
 export function buildStreamUrl(occ, streamId, ext, type) {
-  if (occ.raw_url) return occ.raw_url; // M3U: URL direta
+  if (occ.raw_url) return type === 'live' ? liveAsHls(occ.raw_url) : occ.raw_url; // M3U: URL direta
   if (!occ.host) return '';
   const pathType = type === 'live' ? 'live' : type === 'series' ? 'series' : 'movie';
-  const extension = type === 'live' ? 'ts' : (ext || 'mp4');
+  // Ao vivo em HLS: o <video> não toca MPEG-TS (.ts) cru; o .m3u8 vai pelo hls.js
+  const extension = type === 'live' ? 'm3u8' : (ext || 'mp4');
   const port = occ.port ? `:${occ.port}` : '';
   const host = occ.host.startsWith('http') ? occ.host : `http://${occ.host}`;
   return `${host}${port}/${pathType}/${occ.username}/${occ.password}/${streamId}.${extension}`;
+}
+
+/**
+ * Listas M3U de painéis Xtream trazem o canal como .ts
+ * (http://host/live/user/senha/123.ts ou http://host/user/senha/123);
+ * o mesmo painel serve o canal em HLS trocando para /live/…/123.m3u8.
+ */
+const XTREAM_LIVE = /^(https?:\/\/[^/]+)\/(?:live\/)?([^/]+)\/([^/]+)\/(\d+)(?:\.ts)?$/i;
+export function liveAsHls(url) {
+  const m = XTREAM_LIVE.exec(url);
+  return m ? `${m[1]}/live/${m[2]}/${m[3]}/${m[4]}.m3u8` : url;
 }
 
 export const serverHost = (occ) =>

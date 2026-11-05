@@ -18,6 +18,9 @@
 
   const SAVE_EVERY_MS = 5000;
   const NEXT_CARD_SECS = 20;
+  // Fonte que não entrega nenhum quadro nesse prazo conta como falha (failover).
+  // Alguns painéis respondem a playlist mas nunca mandam os segmentos, sem erro.
+  const START_TIMEOUT_MS = 20000;
 
   // ArtPlayer e hls.js (~800 KB) só são baixados quando o player abre pela 1ª vez
   let libs = null;
@@ -259,6 +262,13 @@
   function bind(a, i, resumeAt) {
     lastSave = 0;
     a.on('dblclick', () => { if (!a.constructor.utils?.isMobile) toggleFullscreen(); });
+    const watchdog = setTimeout(() => {
+      if (a !== art || a.video?.readyState >= 2) return;
+      console.warn('Fonte sem vídeo após', START_TIMEOUT_MS / 1000, 's');
+      fail();
+    }, START_TIMEOUT_MS);
+    a.on('video:loadeddata', () => clearTimeout(watchdog));
+    a.on('destroy', () => clearTimeout(watchdog));
     a.on('ready', () => {
       statuses[i] = 'ok';
       if (resumeAt > 5 && req?.type !== 'live') {
