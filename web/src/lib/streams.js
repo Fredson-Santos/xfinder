@@ -38,6 +38,7 @@ function normalizeTitle(title) {
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/\b(4k|uhd|fhd|hd|sd|h\.?265|hevc)\b/g, ' ')
+    .replace(/\[\s*\]/g, ' ') // "[FHD]" sem a qualidade → igual a "FHD"
     .replace(/[^a-z0-9\[\]]+/g, ' ')
     .trim();
 }
@@ -74,7 +75,16 @@ export function groupResults(rows) {
       g.servers.push({ ...occ, series_id: r.external_id ?? occ.stream_id ?? null });
     }
   }
-  return [...byTitle.values()].flatMap((years) => [...years.values()]).map((g) => ({ ...g, key: itemKey(g) }));
+  // A chave vira id no {#each}: títulos diferentes que gerem o mesmo slug
+  // ganham sufixo, senão o Svelte aborta a renderização da lista inteira.
+  const used = new Set();
+  return [...byTitle.values()].flatMap((years) => [...years.values()]).map((g) => {
+    const base = itemKey(g);
+    let key = base;
+    for (let n = 2; used.has(g.type + key); n++) key = `${base}-${n}`;
+    used.add(g.type + key);
+    return { ...g, key };
+  });
 }
 
 /** Fontes de um filme/canal: uma por servidor. */
