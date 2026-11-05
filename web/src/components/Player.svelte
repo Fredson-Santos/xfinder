@@ -11,6 +11,7 @@
   import { player } from '../lib/player.svelte.js';
   import { settings, SKIP_INTRO_SECS } from '../lib/settings.svelte.js';
   import { toast } from '../lib/toast.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { clock } from '../lib/format.js';
   import { PT_BR } from '../lib/artplayer-i18n.js';
   import Icon from './Icon.svelte';
@@ -303,15 +304,35 @@
     art.notice.show = 'Avançou 1:30';
   }
 
-  function copyLink() {
-    const url = resolved[index] || source?.url;
-    if (!url) return;
-    navigator.clipboard?.writeText(url).then(() => toast('Link copiado!'), () => prompt('Copie o link:', url));
+  async function currentUrl() {
+    let url = resolved[index] || source?.url;
+    if (!url && source?.resolve) {
+      try {
+        url = await source.resolve();
+        resolved[index] = url;
+      } catch (err) {
+        console.warn('Erro ao obter URL do stream:', err);
+      }
+    }
+    return url;
   }
 
-  function openExternal() {
-    const url = resolved[index] || source?.url;
-    if (url) window.open(url, '_blank', 'noopener');
+  async function copyLink() {
+    const url = await currentUrl();
+    if (!url) {
+      toast('URL do stream indisponível.');
+      return;
+    }
+    copyText(url, 'Link copiado!');
+  }
+
+  async function openExternal() {
+    const url = await currentUrl();
+    if (url) {
+      window.open(url, '_blank', 'noopener');
+    } else {
+      toast('URL do stream indisponível.');
+    }
   }
 
   function onKeydown(e) {
@@ -346,6 +367,14 @@
     <div class="tb-text">
       <strong>{req?.title ?? ''}</strong>
       {#if req?.subtitle}<span>{req.subtitle}</span>{/if}
+    </div>
+    <div class="tb-actions">
+      <button class="tb-btn" onclick={copyLink} aria-label="Copiar link" title="Copiar link do stream">
+        <Icon name="copy" size={17} />
+      </button>
+      <button class="tb-btn" onclick={openExternal} aria-label="Abrir em nova aba" title="Abrir em nova aba / player externo">
+        <Icon name="external" size={17} />
+      </button>
     </div>
   </div>
 
@@ -439,6 +468,14 @@
   .tb-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .tb-text strong { font-size: 16px; }
   .tb-text span { font-size: 13px; color: #c3c9d1; }
+  .tb-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; pointer-events: auto; }
+  .tb-btn {
+    width: 36px; height: 36px; border-radius: 50%; border: none;
+    background: rgba(255, 255, 255, 0.12); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background .15s;
+  }
+  .tb-btn:hover { background: rgba(255, 255, 255, 0.24); }
 
   /* ── Card "Próximo episódio" ── */
   .xf-next {

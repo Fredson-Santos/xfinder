@@ -21,6 +21,7 @@
   import { openPlayer, stopPlayer, player } from '../lib/player.svelte.js';
   import { settings } from '../lib/settings.svelte.js';
   import { toast } from '../lib/toast.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { humanDuration, clock, plural } from '../lib/format.js';
   import Cover from '../components/Cover.svelte';
   import Icon from '../components/Icon.svelte';
@@ -262,8 +263,18 @@
   }
 
   function copyLink(ep) {
-    const url = episodeUrl(data.provider, ep.raw);
-    navigator.clipboard?.writeText(url).then(() => toast('Link do episódio copiado!'), () => prompt('Copie o link:', url));
+    if (!ep?.raw) return;
+    const occ = data?.provider || providers[0];
+    if (!occ) {
+      toast('Nenhum servidor disponível para esta série.');
+      return;
+    }
+    const url = episodeUrl(occ, ep.raw);
+    if (url) {
+      copyText(url, 'Link do episódio copiado!');
+    } else {
+      toast('Não foi possível gerar o link do episódio.');
+    }
   }
 
   function onFav() {

@@ -8,6 +8,7 @@
   import { mediaSources } from '../lib/streams.js';
   import { daysUntil } from '../lib/format.js';
   import { toast } from '../lib/toast.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import Icon from './Icon.svelte';
 
   let { item } = $props();
@@ -25,7 +26,7 @@
   }
 
   function copy(url) {
-    navigator.clipboard?.writeText(url).then(() => toast('Link copiado!'), () => prompt('Copie o link:', url));
+    copyText(url, 'Link copiado!');
   }
 </script>
 

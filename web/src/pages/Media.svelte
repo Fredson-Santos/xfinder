@@ -8,6 +8,7 @@
   import { openPlayer, stopPlayer, player } from '../lib/player.svelte.js';
   import { settings } from '../lib/settings.svelte.js';
   import { toast } from '../lib/toast.svelte.js';
+  import { copyText } from '../lib/clipboard.js';
   import { TYPE_LABEL, humanDuration, plural } from '../lib/format.js';
   import Cover from '../components/Cover.svelte';
   import Icon from '../components/Icon.svelte';
@@ -58,7 +59,11 @@
 
   function copy() {
     const url = sources[0]?.url;
-    if (url) navigator.clipboard?.writeText(url).then(() => toast('Link copiado!'), () => prompt('Copie o link:', url));
+    if (url) {
+      copyText(url, 'Link copiado!');
+    } else {
+      toast('Nenhuma fonte disponível para cópia.');
+    }
   }
 
   function onFav() {
