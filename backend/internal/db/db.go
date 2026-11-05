@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -14,8 +15,9 @@ import (
 )
 
 type DB struct {
-	conn *sql.DB
-	mu   sync.RWMutex
+	conn   *sql.DB
+	mu     sync.RWMutex
+	groups atomic.Pointer[hostGroups] // contas agrupadas por host (ver hostgroups.go)
 }
 
 func Open(dbPath string) (*DB, error) {
@@ -91,6 +93,7 @@ func (d *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_media_type_cat ON media(type, category);
 	CREATE INDEX IF NOT EXISTS idx_media_type_title ON media(type, title);
 	CREATE INDEX IF NOT EXISTS idx_media_title ON media(title);
+	CREATE INDEX IF NOT EXISTS idx_media_type_server_title ON media(type, server_id, title);
 	CREATE INDEX IF NOT EXISTS idx_servers_status ON servers(status);
 	`
 	_, err := d.conn.Exec(schema)
@@ -160,6 +163,7 @@ func (d *DB) GetServerByID(id int64) (*models.Server, error) {
 func (d *DB) InsertServer(s *models.Server) (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	res, err := d.conn.Exec(`
 		INSERT INTO servers (name, type, host, port, username, password, m3u_url, expiry, status)
@@ -174,6 +178,7 @@ func (d *DB) InsertServer(s *models.Server) (int64, error) {
 func (d *DB) DeleteServer(id int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	tx, err := d.conn.Begin()
 	if err != nil {
@@ -194,6 +199,7 @@ func (d *DB) DeleteServer(id int64) error {
 func (d *DB) UpdateServerStatus(id int64, status string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	_, err := d.conn.Exec("UPDATE servers SET status = ?, last_sync = strftime('%s','now') WHERE id = ?", status, id)
 	return err
@@ -202,6 +208,7 @@ func (d *DB) UpdateServerStatus(id int64, status string) error {
 func (d *DB) UpdateServerStats(id int64, expiry *string, activeCons, maxCons *int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	_, err := d.conn.Exec(
 		"UPDATE servers SET expiry = ?, active_connections = ?, max_connections = ? WHERE id = ?",
@@ -213,6 +220,7 @@ func (d *DB) UpdateServerStats(id int64, expiry *string, activeCons, maxCons *in
 func (d *DB) CleanExpiredServers() (int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	rows, err := d.conn.Query("SELECT id, expiry FROM servers WHERE expiry IS NOT NULL")
 	if err != nil {
@@ -267,6 +275,7 @@ func (d *DB) CleanExpiredServers() (int, error) {
 func (d *DB) ReplaceMedia(serverID int64, mediaList []models.Media) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	defer d.invalidateGroups()
 
 	tx, err := d.conn.Begin()
 	if err != nil {
@@ -310,13 +319,11 @@ func (d *DB) ReplaceMedia(serverID int64, mediaList []models.Media) error {
 }
 
 type rawSearchRow struct {
-	mediaID                                                                int64
-	title, mType                                                           string
-	year                                                                   sql.NullInt64
-	coverURL, externalID                                                   sql.NullString
-	serverID                                                               int64
-	serverName, serverType                                                 string
-	host, port, username, password, streamID, containerExt, rawURL, expiry sql.NullString
+	mediaID, serverID              int64
+	title, mType                   string
+	year                           sql.NullInt64
+	coverURL, externalID           sql.NullString
+	streamID, containerExt, rawURL sql.NullString
 }
 
 // SearchMedia realiza busca concorrente usando Goroutines por tipo de mídia retornando todas as mídias individuais adicionadas
@@ -338,40 +345,62 @@ func (d *DB) SearchMediaTypes(query string, limit int, onlyTypes []string) ([]mo
 		return []models.SearchResult{}, nil
 	}
 
+	groups, err := d.loadHostGroups()
+	if err != nil {
+		return nil, err
+	}
+	if len(groups.reps) == 0 {
+		return []models.SearchResult{}, nil
+	}
+
 	likeQuery := "%" + cleanQuery + "%"
 	types := []string{"movie", "series", "live"}
 	if len(onlyTypes) > 0 {
 		types = onlyTypes
 	}
 
-	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex
-		allRows []rawSearchRow
-	)
+	// Só o catálogo de uma conta por host é varrido; o índice (type, server_id, title)
+	// faz o custo depender do número de hosts distintos, não do número de contas.
+	inList := strings.TrimSuffix(strings.Repeat("?,", len(groups.reps)), ",")
+	sqlQuery := `
+		SELECT m.id, m.server_id, m.title, m.type, m.year, m.cover_url, m.external_id,
+		       m.stream_id, m.container_extension, m.raw_url
+		FROM media m INDEXED BY idx_media_type_server_title
+		WHERE m.type = ? AND m.server_id IN (` + inList + `) AND m.title LIKE ?
+		ORDER BY m.title ASC
+		LIMIT ?
+	`
 
-	// Dispara 3 Goroutines simultâneas (uma para cada tipo de mídia)
 	typeLimit := limit / len(types)
 	if typeLimit < 100 {
 		typeLimit = 150
 	}
 
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		allRows []rawSearchRow
+		qErr    error
+	)
+
+	// Uma goroutine por tipo de mídia
 	for _, mType := range types {
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
 
-			rows, err := d.conn.Query(`
-				SELECT m.id, m.title, m.type, m.year, m.cover_url, m.external_id,
-				       s.id, s.name, s.type, s.host, s.port, s.username, s.password,
-				       m.stream_id, m.container_extension, m.raw_url, s.expiry
-				FROM media m
-				JOIN servers s ON m.server_id = s.id
-				WHERE m.type = ? AND m.title LIKE ? AND s.status = 'ok'
-				ORDER BY m.title ASC
-				LIMIT ?
-			`, t, likeQuery, typeLimit)
+			args := make([]interface{}, 0, len(groups.reps)+3)
+			args = append(args, t)
+			for _, id := range groups.reps {
+				args = append(args, id)
+			}
+			args = append(args, likeQuery, typeLimit)
+
+			rows, err := d.conn.Query(sqlQuery, args...)
 			if err != nil {
+				mu.Lock()
+				qErr = err
+				mu.Unlock()
 				return
 			}
 			defer rows.Close()
@@ -380,25 +409,24 @@ func (d *DB) SearchMediaTypes(query string, limit int, onlyTypes []string) ([]mo
 			for rows.Next() {
 				var r rawSearchRow
 				if err := rows.Scan(
-					&r.mediaID, &r.title, &r.mType, &r.year, &r.coverURL, &r.externalID,
-					&r.serverID, &r.serverName, &r.serverType, &r.host, &r.port, &r.username, &r.password,
-					&r.streamID, &r.containerExt, &r.rawURL, &r.expiry,
+					&r.mediaID, &r.serverID, &r.title, &r.mType, &r.year, &r.coverURL, &r.externalID,
+					&r.streamID, &r.containerExt, &r.rawURL,
 				); err == nil {
 					localRows = append(localRows, r)
 				}
 			}
 
-			if len(localRows) > 0 {
-				mu.Lock()
-				allRows = append(allRows, localRows...)
-				mu.Unlock()
-			}
+			mu.Lock()
+			allRows = append(allRows, localRows...)
+			mu.Unlock()
 		}(mType)
 	}
 
 	wg.Wait()
+	if qErr != nil && len(allRows) == 0 {
+		return nil, qErr
+	}
 
-	// Retorna todas as mídias individualmente sem restrição de título único ou consolidação forçada
 	list := make([]models.SearchResult, 0, len(allRows))
 	for _, r := range allRows {
 		sr := models.SearchResult{
@@ -410,49 +438,41 @@ func (d *DB) SearchMediaTypes(query string, limit int, onlyTypes []string) ([]mo
 			y := int(r.year.Int64)
 			sr.Year = &y
 		}
-		if r.coverURL.Valid {
-			sr.CoverURL = &r.coverURL.String
-		}
-		if r.externalID.Valid {
-			sr.ExternalID = &r.externalID.String
-		}
+		sr.CoverURL = nullStr(r.coverURL)
+		sr.ExternalID = nullStr(r.externalID)
 
-		srv := models.SearchResultServer{
-			MediaID:    r.mediaID,
-			ServerID:   r.serverID,
-			ServerName: r.serverName,
-			ServerType: r.serverType,
+		// A conta representante primeiro, depois as outras contas do mesmo host
+		// (mesmo stream_id, credenciais próprias) como fontes de failover.
+		accs := groups.accounts[r.serverID]
+		sr.Servers = make([]models.SearchResultServer, 0, len(accs))
+		for _, a := range accs {
+			sr.Servers = append(sr.Servers, models.SearchResultServer{
+				MediaID:            r.mediaID,
+				ServerID:           a.id,
+				ServerName:         a.name,
+				ServerType:         a.sType,
+				Host:               nullStr(a.host),
+				Port:               nullStr(a.port),
+				Username:           nullStr(a.username),
+				Password:           nullStr(a.password),
+				StreamID:           nullStr(r.streamID),
+				ContainerExtension: nullStr(r.containerExt),
+				RawURL:             nullStr(r.rawURL),
+				Expiry:             nullStr(a.expiry),
+			})
 		}
-		if r.host.Valid {
-			srv.Host = &r.host.String
-		}
-		if r.port.Valid {
-			srv.Port = &r.port.String
-		}
-		if r.username.Valid {
-			srv.Username = &r.username.String
-		}
-		if r.password.Valid {
-			srv.Password = &r.password.String
-		}
-		if r.streamID.Valid {
-			srv.StreamID = &r.streamID.String
-		}
-		if r.containerExt.Valid {
-			srv.ContainerExtension = &r.containerExt.String
-		}
-		if r.rawURL.Valid {
-			srv.RawURL = &r.rawURL.String
-		}
-		if r.expiry.Valid {
-			srv.Expiry = &r.expiry.String
-		}
-
-		sr.Servers = []models.SearchResultServer{srv}
 		list = append(list, sr)
 	}
 
 	return list, nil
+}
+
+func nullStr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
 }
 
 // GetDistinctCategories obtém a lista de categorias ordenadas para um determinado tipo
