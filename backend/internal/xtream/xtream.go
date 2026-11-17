@@ -33,13 +33,37 @@ var defaultClient = &http.Client{
 
 const DefaultUserAgent = "IPTVSmartersPro/1.0.0 (Linux; Android 11)"
 
+// FlexString aceita string, número, booleano ou null no JSON. Painéis Xtream
+// variam o tipo dos campos (ex.: active_cons vem como 0 ou "0"); com string
+// pura o Unmarshal inteiro falhava e a conta ficava sem validação.
+type FlexString string
+
+func (f *FlexString) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	switch {
+	case s == "null":
+		*f = ""
+	case strings.HasPrefix(s, `"`):
+		var v string
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		*f = FlexString(strings.TrimSpace(v))
+	default: // número ou booleano
+		*f = FlexString(s)
+	}
+	return nil
+}
+
 type UserInfo struct {
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	Status         string `json:"status"`
-	ExpDate        string `json:"exp_date"`
-	ActiveCons     string `json:"active_cons"`
-	MaxConnections string `json:"max_connections"`
+	Username       FlexString `json:"username"`
+	Password       FlexString `json:"password"`
+	Auth           FlexString `json:"auth"`
+	Status         FlexString `json:"status"`
+	Message        FlexString `json:"message"`
+	ExpDate        FlexString `json:"exp_date"`
+	ActiveCons     FlexString `json:"active_cons"`
+	MaxConnections FlexString `json:"max_connections"`
 }
 
 type XtreamAuthResponse struct {
@@ -175,7 +199,7 @@ func ExtractYear(str string) *int {
 func GetInfo(host, port, user, pass string) (*XtreamAuthResponse, error) {
 	u := ApiURL(host, port, user, pass)
 	var auth XtreamAuthResponse
-	if err := fetchJSON(u, &auth, 6*time.Second); err != nil {
+	if err := fetchJSON(u, &auth, 12*time.Second); err != nil {
 		return nil, err
 	}
 	return &auth, nil

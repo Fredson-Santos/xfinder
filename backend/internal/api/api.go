@@ -242,30 +242,43 @@ func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, e
 			pass = *server.Password
 		}
 
-		// Valida e atualiza status da conta
-		if info, err := xtream.GetInfo(host, port, user, pass); err == nil && info != nil {
-			if strings.ToLower(info.UserInfo.Status) == "expired" {
+		// Valida a conta. Falha aqui conta como erro: antes era ignorada e
+		// listas com credencial inválida passavam só porque o catálogo respondia.
+		connsBusy := false
+		info, err := xtream.GetInfo(host, port, user, pass)
+		if err != nil {
+			syncErr = fmt.Errorf("falha ao consultar a conta: %v", err)
+		} else {
+			ui := info.UserInfo
+			status := strings.ToLower(string(ui.Status))
+			auth := strings.ToLower(string(ui.Auth))
+			switch {
+			case auth == "0" || auth == "false":
+				syncErr = fmt.Errorf("usuário ou senha inválidos")
+			case status == "expired":
 				syncErr = fmt.Errorf("conta expirada no provedor")
-			} else {
+			case status != "" && status != "active":
+				syncErr = fmt.Errorf("conta %s no provedor", ui.Status)
+			}
+			if syncErr == nil {
 				var expStr *string
-				if info.UserInfo.ExpDate != "" {
-					expTs, _ := strconv.ParseInt(info.UserInfo.ExpDate, 10, 64)
-					if expTs > 0 {
-						if expTs*1000 < time.Now().UnixNano()/1e6 {
-							syncErr = fmt.Errorf("conta expirou em %s", time.Unix(expTs, 0).Format("2006-01-02"))
-						} else {
-							tStr := time.Unix(expTs, 0).Format("2006-01-02")
-							expStr = &tStr
-						}
+				if expTs, _ := strconv.ParseInt(string(ui.ExpDate), 10, 64); expTs > 0 {
+					if time.Unix(expTs, 0).Before(time.Now()) {
+						syncErr = fmt.Errorf("conta expirou em %s", time.Unix(expTs, 0).Format("2006-01-02"))
+					} else {
+						tStr := time.Unix(expTs, 0).Format("2006-01-02")
+						expStr = &tStr
 					}
 				}
 				var activeCons, maxCons *int
-				if c, err := strconv.Atoi(info.UserInfo.ActiveCons); err == nil {
+				if c, err := strconv.Atoi(string(ui.ActiveCons)); err == nil {
 					activeCons = &c
 				}
-				if m, err := strconv.Atoi(info.UserInfo.MaxConnections); err == nil {
+				if m, err := strconv.Atoi(string(ui.MaxConnections)); err == nil {
 					maxCons = &m
 				}
+				// Todas as conexões em uso: o teste de reprodução daria falso negativo
+				connsBusy = activeCons != nil && maxCons != nil && *maxCons > 0 && *activeCons >= *maxCons
 				a.database.UpdateServerStats(id, expStr, activeCons, maxCons)
 			}
 		}
@@ -273,9 +286,15 @@ func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, e
 		if syncErr == nil {
 			mediaList, syncErr = xtream.SyncCatalogue(host, port, user, pass)
 		}
+		if syncErr == nil && !connsBusy {
+			syncErr = xtream.ProbeAny(sampleStreamURLs(server, mediaList))
+		}
 	} else if server.Type == "m3u" {
 		if server.M3UUrl != nil && *server.M3UUrl != "" {
 			mediaList, syncErr = m3u.ParseM3U(*server.M3UUrl)
+			if syncErr == nil {
+				syncErr = xtream.ProbeAny(sampleStreamURLs(server, mediaList))
+			}
 		} else {
 			syncErr = fmt.Errorf("URL M3U não configurada")
 		}
@@ -300,6 +319,77 @@ func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, e
 
 	a.database.FinishServerSync(id, "ok", "")
 	return fmt.Sprintf("Sincronizado com sucesso! %d itens catalogados.", len(mediaList)), nil
+}
+
+// sampleStreamURLs escolhe até 3 filmes e 3 canais espalhados pelo catálogo
+// (intercalados) para o teste de reprodução. Séries ficam de fora: exigiriam
+// buscar os episódios de cada uma.
+func sampleStreamURLs(server *models.Server, media []models.Media) []string {
+	const perType = 3
+	var movies, lives []models.Media
+	for _, m := range media {
+		switch m.Type {
+		case "movie":
+			movies = append(movies, m)
+		case "live":
+			lives = append(lives, m)
+		}
+	}
+	pick := func(list []models.Media) []models.Media {
+		if len(list) <= perType {
+			return list
+		}
+		out := make([]models.Media, 0, perType)
+		for i := 0; i < perType; i++ {
+			out = append(out, list[(i*2+1)*len(list)/(perType*2)])
+		}
+		return out
+	}
+
+	toURL := func(m models.Media) string {
+		if server.Type == "m3u" || m.StreamID == nil {
+			if m.RawURL != nil {
+				return *m.RawURL
+			}
+			return ""
+		}
+		host, port, user, pass := "", "", "", ""
+		if server.Host != nil {
+			host = *server.Host
+		}
+		if server.Port != nil {
+			port = *server.Port
+		}
+		if server.Username != nil {
+			user = *server.Username
+		}
+		if server.Password != nil {
+			pass = *server.Password
+		}
+		base := xtream.BaseURL(host, port)
+		u, p := url.PathEscape(user), url.PathEscape(pass)
+		if m.Type == "live" {
+			return fmt.Sprintf("%s/live/%s/%s/%s.ts", base, u, p, *m.StreamID)
+		}
+		ext := "mp4"
+		if m.ContainerExtension != nil && *m.ContainerExtension != "" {
+			ext = *m.ContainerExtension
+		}
+		return fmt.Sprintf("%s/movie/%s/%s/%s.%s", base, u, p, *m.StreamID, ext)
+	}
+
+	pm, pl := pick(movies), pick(lives)
+	var urls []string
+	for i := 0; i < perType; i++ {
+		for _, group := range [][]models.Media{pm, pl} {
+			if i < len(group) {
+				if u := toURL(group[i]); u != "" {
+					urls = append(urls, u)
+				}
+			}
+		}
+	}
+	return urls
 }
 
 func (a *APIHandler) SyncServer(w http.ResponseWriter, r *http.Request, idStr string) {
