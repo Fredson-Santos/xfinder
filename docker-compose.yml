@@ -10,6 +10,10 @@ services:
       - HOST=0.0.0.0
       - DATA_DIR=/app/data
       - WEB_DIR=/app/web
+      # Fuso usado pelo agendamento diário (sem isso o contêiner roda em UTC)
+      - TZ=America/Sao_Paulo
+      # Sincronização automática de todas as listas (HH:MM ou "off")
+      - DAILY_SYNC_AT=03:00
     ports:
       - "2332:2332"
     volumes:

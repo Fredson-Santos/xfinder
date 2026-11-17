@@ -30,6 +30,9 @@ export const api = {
   syncServer: (id, deleteOnError = false) =>
     request('POST', `/servers/${id}/sync?deleteOnError=${deleteOnError}`).then((d) => d.message),
 
+  /** Agendamento e andamento da sincronização automática diária. */
+  syncStatus: () => request('GET', '/sync/status'),
+
   search: (query) => request('GET', `/search?q=${encodeURIComponent(query)}`),
 
   getEpisodes: (occ, seriesId) =>

@@ -126,6 +126,14 @@ func main() {
 		http.ServeFile(w, r, indexPath)
 	})
 
+	// Servidores que ficaram presos em 'syncing' (processo encerrado no meio)
+	if n, err := database.ResetStuckSyncing(); err == nil && n > 0 {
+		log.Printf("  ➜ %d servidor(es) com sincronização interrompida marcado(s) como erro.", n)
+	}
+
+	// Sincronização automática diária (DAILY_SYNC_AT, padrão 03:00; "off" desativa)
+	apiHandler.StartDailySync(api.DailySyncAtFromEnv())
+
 	// Limpeza inicial de servidores expirados no boot
 	if removed, err := database.CleanExpiredServers(); err == nil && removed > 0 {
 		log.Printf("  ➜ AutoExpire: %d servidor(es) expirado(s) removido(s) na inicialização.", removed)

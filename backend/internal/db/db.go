@@ -100,15 +100,28 @@ func (d *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_media_type_server_title ON media(type, server_id, title);
 	CREATE INDEX IF NOT EXISTS idx_servers_status ON servers(status);
 	`
-	_, err := d.conn.Exec(schema)
-	return err
+	if _, err := d.conn.Exec(schema); err != nil {
+		return err
+	}
+
+	// Migração: motivo da última falha de sincronização
+	var hasLastError int
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('servers') WHERE name = 'last_error'`).Scan(&hasLastError); err != nil {
+		return err
+	}
+	if hasLastError == 0 {
+		if _, err := d.conn.Exec(`ALTER TABLE servers ADD COLUMN last_error TEXT`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *DB) GetServers() ([]models.Server, error) {
 
 	rows, err := d.conn.Query(`
 		SELECT id, name, type, host, port, username, password, m3u_url, expiry,
-		       active_connections, max_connections, status, last_sync, created_at,
+		       active_connections, max_connections, status, last_sync, last_error, created_at,
 		       (SELECT COUNT(*) FROM media m WHERE m.server_id = servers.id)
 		FROM servers ORDER BY id
 	`)
@@ -124,7 +137,7 @@ func (d *DB) GetServers() ([]models.Server, error) {
 		var mediaCount int64
 		err := rows.Scan(
 			&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.Username, &s.Password, &s.M3UUrl,
-			&s.Expiry, &s.ActiveConnections, &s.MaxConnections, &s.Status, &lastSync, &s.CreatedAt,
+			&s.Expiry, &s.ActiveConnections, &s.MaxConnections, &s.Status, &lastSync, &s.LastError, &s.CreatedAt,
 			&mediaCount,
 		)
 		if err != nil {
@@ -139,17 +152,36 @@ func (d *DB) GetServers() ([]models.Server, error) {
 	return list, nil
 }
 
+// GetServerIDs lista os ids de todos os servidores (sem a contagem de mídia).
+func (d *DB) GetServerIDs() ([]int64, error) {
+	rows, err := d.conn.Query("SELECT id FROM servers ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (d *DB) GetServerByID(id int64) (*models.Server, error) {
 
 	var s models.Server
 	var lastSync sql.NullInt64
 	err := d.conn.QueryRow(`
 		SELECT id, name, type, host, port, username, password, m3u_url, expiry,
-		       active_connections, max_connections, status, last_sync, created_at
+		       active_connections, max_connections, status, last_sync, last_error, created_at
 		FROM servers WHERE id = ?
 	`, id).Scan(
 		&s.ID, &s.Name, &s.Type, &s.Host, &s.Port, &s.Username, &s.Password, &s.M3UUrl,
-		&s.Expiry, &s.ActiveConnections, &s.MaxConnections, &s.Status, &lastSync, &s.CreatedAt,
+		&s.Expiry, &s.ActiveConnections, &s.MaxConnections, &s.Status, &lastSync, &s.LastError, &s.CreatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -196,13 +228,43 @@ func (d *DB) DeleteServer(id int64) error {
 	return tx.Commit()
 }
 
-func (d *DB) UpdateServerStatus(id int64, status string) error {
+// MarkServerSyncing marca o servidor como em sincronização (last_sync só muda ao terminar).
+func (d *DB) MarkServerSyncing(id int64) error {
 	d.wmu.Lock()
 	defer d.wmu.Unlock()
 	defer d.invalidateGroups()
 
-	_, err := d.conn.Exec("UPDATE servers SET status = ?, last_sync = strftime('%s','now') WHERE id = ?", status, id)
+	_, err := d.conn.Exec("UPDATE servers SET status = 'syncing' WHERE id = ?", id)
 	return err
+}
+
+// FinishServerSync grava o resultado de uma sincronização. lastError vazio limpa o erro anterior.
+func (d *DB) FinishServerSync(id int64, status, lastError string) error {
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
+	defer d.invalidateGroups()
+
+	_, err := d.conn.Exec(
+		"UPDATE servers SET status = ?, last_error = NULLIF(?, ''), last_sync = strftime('%s','now') WHERE id = ?",
+		status, lastError, id,
+	)
+	return err
+}
+
+// ResetStuckSyncing corrige servidores que ficaram em 'syncing' porque o processo
+// foi encerrado no meio de uma sincronização.
+func (d *DB) ResetStuckSyncing() (int64, error) {
+	d.wmu.Lock()
+	defer d.wmu.Unlock()
+	defer d.invalidateGroups()
+
+	res, err := d.conn.Exec(
+		"UPDATE servers SET status = 'error', last_error = 'Sincronização interrompida (o servidor foi reiniciado)' WHERE status = 'syncing'",
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (d *DB) UpdateServerStats(id int64, expiry *string, activeCons, maxCons *int) error {
