@@ -11,14 +11,16 @@ android {
         applicationId = "br.xfinder.series"
         minSdk = 23
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
     signingConfigs {
+        // Chave fora do repositório (~/.android/xfinder-tv.keystore). Perder este
+        // arquivo obriga a desinstalar o app da TV para instalar uma nova versão.
         create("fixed") {
-            storeFile = file("../../android-tv/debug.keystore")
+            storeFile = file(System.getProperty("user.home") + "/.android/xfinder-tv.keystore")
             storePassword = "android"
-            keyAlias = "key"
+            keyAlias = "xfinder"
             keyPassword = "android"
         }
     }
@@ -43,6 +45,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
