@@ -7,7 +7,39 @@ export const servers = $state({
   loaded: false,
   /** ids em sincronização agora (estado só da interface) */
   syncing: new Set(),
+  /** andamento do lote disparado pelo painel: {total, done, ok, failed} ou null */
+  batch: null,
+  /** resultado recente por id: {ok, message} — some depois de alguns segundos */
+  results: {},
+  /** status da sincronização automática diária (GET /api/sync/status) */
+  daily: null,
 });
+
+const RESULT_MS = 12000;
+
+export async function loadDailyStatus() {
+  try {
+    servers.daily = await api.syncStatus();
+  } catch {
+    /* backend antigo sem o endpoint: só não mostra o agendamento */
+  }
+}
+
+/** Recarrega a lista no máximo a cada `ms` (usado durante o lote). */
+let reloadTimer = null;
+function reloadSoon(ms = 2500) {
+  if (reloadTimer) return;
+  reloadTimer = setTimeout(() => { reloadTimer = null; loadServers(); }, ms);
+}
+
+function setResult(id, ok, message) {
+  servers.results = { ...servers.results, [id]: { ok, message } };
+  setTimeout(() => {
+    if (servers.results[id]?.message !== message) return;
+    const { [id]: _, ...rest } = servers.results;
+    servers.results = rest;
+  }, RESULT_MS);
+}
 
 export const okServers = () => servers.list.filter((s) => s.status === 'ok');
 
@@ -52,21 +84,34 @@ export async function syncServers(ids, { deleteOnError = false, onEach } = {}) {
   ids.forEach((id) => servers.syncing.add(id));
   servers.syncing = new Set(servers.syncing);
 
+  // Lotes simultâneos (ex.: clicar em outra linha durante um lote) somam no mesmo contador
+  const b = servers.batch ?? { total: 0, done: 0, ok: 0, failed: 0 };
+  servers.batch = { ...b, total: b.total + ids.length };
+
   await pool(ids, 6, async (id) => {
+    let ok = false;
+    let message = '';
     try {
-      await api.syncServer(id, deleteOnError);
+      message = await api.syncServer(id, deleteOnError);
+      ok = true;
       result.ok++;
     } catch (err) {
+      message = err.message;
       result.failed++;
       result.errors.push(err.message);
     } finally {
       servers.syncing.delete(id);
       servers.syncing = new Set(servers.syncing);
+      setResult(id, ok, message);
+      const cur = servers.batch;
+      if (cur) servers.batch = { ...cur, done: cur.done + 1, ok: cur.ok + (ok ? 1 : 0), failed: cur.failed + (ok ? 0 : 1) };
       onEach?.(result);
+      reloadSoon();
     }
   });
 
   await loadServers();
+  if (servers.batch && servers.batch.done >= servers.batch.total) servers.batch = null;
   return result;
 }
 

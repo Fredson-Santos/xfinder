@@ -3,9 +3,10 @@
    * Servidores: filtro por texto/status, seleção múltipla (inclui Shift+clique
    * para intervalo) e ações em lote (sincronizar / remover).
    */
-  import { servers, serverKind, syncServers, removeServers, loadServers } from '../lib/servers.svelte.js';
+  import { onMount } from 'svelte';
+  import { servers, serverKind, syncServers, removeServers, loadServers, loadDailyStatus } from '../lib/servers.svelte.js';
   import { api } from '../lib/api.js';
-  import { daysUntil, formatNumber, plural } from '../lib/format.js';
+  import { daysUntil, formatNumber, plural, timeAgo } from '../lib/format.js';
   import { toast } from '../lib/toast.svelte.js';
   import { copyText } from '../lib/clipboard.js';
   import Icon from './Icon.svelte';
@@ -55,6 +56,54 @@
   let selectedIds = $derived([...selected]);
   let allVisibleSelected = $derived(visible.length > 0 && visible.every((r) => selected.has(r.id)));
   let someVisibleSelected = $derived(!allVisibleSelected && visible.some((r) => selected.has(r.id)));
+
+  // Acompanha sincronizações que não partiram desta aba (agendamento diário,
+  // outra aba, bot do Telegram): enquanto houver alguma, recarrega a cada 4s.
+  onMount(() => {
+    loadDailyStatus();
+    let wasRunning = false;
+    const fast = setInterval(async () => {
+      const remote = servers.list.some((s) => s.status === 'syncing' && !servers.syncing.has(s.id));
+      if (!remote && !servers.daily?.running) return;
+      await loadDailyStatus();
+      loadServers();
+      wasRunning = !!servers.daily?.running;
+    }, 4000);
+    const slow = setInterval(async () => {
+      await loadDailyStatus();
+      if (wasRunning && !servers.daily?.running) loadServers();
+      wasRunning = !!servers.daily?.running;
+    }, 60000);
+    return () => { clearInterval(fast); clearInterval(slow); };
+  });
+
+  let batchPct = $derived(servers.batch?.total ? Math.round((servers.batch.done / servers.batch.total) * 100) : 0);
+  let daily = $derived(servers.daily);
+  let dailyPct = $derived(daily?.running && daily.total ? Math.round((daily.done / daily.total) * 100) : 0);
+
+  function dailyRunLabel(d) {
+    if (d.phase === 'waiting') return 'Sincronização automática: aguardando para tentar de novo as listas que falharam…';
+    if (d.phase === 'retry') return `Sincronização automática · nova tentativa ${d.done}/${d.total} (as que falharem de novo serão apagadas)`;
+    return `Sincronização automática · ${d.done}/${d.total}`;
+  }
+
+  function whenLabel(ms) {
+    const d = new Date(ms);
+    const hm = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const today = new Date();
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    if (d.toDateString() === today.toDateString()) return `hoje às ${hm}`;
+    if (d.toDateString() === tomorrow.toDateString()) return `amanhã às ${hm}`;
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function lastRunLabel(r) {
+    let txt = `Última: ${timeAgo(r.finishedAt)} · ${r.ok}/${r.total} ok`;
+    if (r.removed) txt += ` · ${plural(r.removed, 'apagada', 'apagadas')}`;
+    if (r.kept) txt += ` · ${r.kept} com erro mantida(s)`;
+    if (r.note) txt += ` — ${r.note}`;
+    return txt;
+  }
 
   function hostOf(s) {
     if (s.type === 'm3u') return s.m3u_url || '';
@@ -107,7 +156,6 @@
   }
 
   async function sync(ids) {
-    toast(ids.length === 1 ? 'Sincronizando…' : `Sincronizando ${ids.length} servidores…`);
     const res = await syncServers(ids);
     toast(res.failed
       ? `${res.ok} sincronizado(s) · ${res.failed} com erro${res.errors[0] ? ` (${res.errors[0]})` : ''}`
@@ -167,6 +215,40 @@
   </button>
 </div>
 
+{#if servers.batch}
+  <div class="progress" role="status" aria-live="polite">
+    <div class="progress-head">
+      <span class="spinner"></span>
+      <strong>Sincronizando {servers.batch.done}/{servers.batch.total}</strong>
+      <span class="dim">· {servers.batch.ok} ok{#if servers.batch.failed} · <span class="err">{servers.batch.failed} com erro</span>{/if}</span>
+    </div>
+    <div class="bar"><div class="fill" style="width: {batchPct}%"></div></div>
+  </div>
+{/if}
+
+{#if daily?.running}
+  <div class="progress" role="status" aria-live="polite">
+    <div class="progress-head">
+      <span class="spinner"></span>
+      <strong>{dailyRunLabel(daily)}</strong>
+    </div>
+    {#if daily.phase !== 'waiting'}<div class="bar"><div class="fill" style="width: {dailyPct}%"></div></div>{/if}
+  </div>
+{/if}
+
+{#if daily}
+  <p class="schedule">
+    <Icon name="sync" size={13} />
+    {#if daily.enabled}
+      Sincronização automática todo dia às {daily.at}{#if daily.nextRun && !daily.running} · próxima {whenLabel(daily.nextRun)}{/if}.
+      Listas que falharem duas vezes seguidas são apagadas.
+    {:else}
+      Sincronização automática desativada.
+    {/if}
+    {#if daily.lastRun}<span class="dim">{lastRunLabel(daily.lastRun)}</span>{/if}
+  </p>
+{/if}
+
 <div class="table-wrap">
   <table>
     <thead>
@@ -179,6 +261,7 @@
         <th>Tipo</th>
         <th>Status</th>
         <th>Vencimento</th>
+        <th>Última sync</th>
         <th class="num">Conteúdos</th>
         <th class="num">Ações</th>
       </tr>
@@ -196,12 +279,33 @@
             <div class="host mono" title={hostOf(row)}>{hostOf(row)}</div>
           </td>
           <td class="dim">{row.type === 'm3u' ? 'M3U' : 'Xtream'}</td>
-          <td><span class="status {KIND[row.kind].cls}"><span class="dot"></span>{KIND[row.kind].label}</span></td>
+          <td>
+            <div class="status-cell">
+              <span class="status {KIND[row.kind].cls}" title={row.kind === 'error' ? row.last_error : undefined}>
+                {#if row.kind === 'syncing'}<span class="mini-spin"></span>{:else}<span class="dot"></span>{/if}
+                {KIND[row.kind].label}
+              </span>
+              {#if servers.results[row.id] && row.kind !== 'syncing'}
+                {@const res = servers.results[row.id]}
+                <span class="res" class:ok={res.ok} class:err={!res.ok} title={res.message}>
+                  <Icon name={res.ok ? 'check' : 'close'} size={13} stroke={3} />
+                </span>
+              {/if}
+            </div>
+            {#if row.kind === 'error' && row.last_error}
+              <div class="err-msg" title={row.last_error}>{row.last_error}</div>
+            {/if}
+          </td>
           <td><span class="exp {exp.cls}">{exp.text}</span></td>
+          <td class="dim" title={row.last_sync ? new Date(row.last_sync * 1000).toLocaleString('pt-BR') : undefined}>
+            {row.last_sync ? timeAgo(row.last_sync * 1000) : '—'}
+          </td>
           <td class="num mono dim">{row.status === 'ok' ? formatNumber(row.media_count) : '—'}</td>
           <td class="num actions">
             <button class="btn btn-sm btn-icon" onclick={() => sync([row.id])} disabled={row.kind === 'syncing'}
-                    aria-label="Sincronizar {row.name}" title="Sincronizar"><Icon name="sync" size={14} /></button>
+                    aria-label="Sincronizar {row.name}" title="Sincronizar">
+              <span class="icon-wrap" class:spinning={row.kind === 'syncing'}><Icon name="sync" size={14} /></span>
+            </button>
             <button class="btn btn-sm btn-icon" onclick={() => copyM3u(row)}
                     aria-label="Copiar link M3U de {row.name}" title="Copiar link M3U"><Icon name="copy" size={14} /></button>
             <button class="btn btn-sm btn-icon" onclick={() => (confirmIds = [row.id])}
@@ -289,4 +393,36 @@
   .exp.warn { color: var(--warn); font-weight: 600; }
   .exp.danger { color: var(--danger-text); font-weight: 600; }
   .empty { padding: 40px; }
+
+  .progress {
+    display: flex; flex-direction: column; gap: 8px; padding: 12px 14px;
+    border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-soft);
+  }
+  .progress-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13.5px; }
+  .progress-head .spinner { width: 14px; height: 14px; }
+  .progress .err { color: var(--danger-text); font-weight: 600; }
+  .bar { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+  .fill { height: 100%; background: var(--accent); border-radius: inherit; transition: width .3s ease; }
+
+  .schedule { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); margin: 0; }
+
+  .status-cell { display: flex; align-items: center; gap: 6px; }
+  .mini-spin {
+    width: 9px; height: 9px; border-radius: 50%;
+    border: 2px solid currentColor; border-top-color: transparent;
+    animation: spin .8s linear infinite;
+  }
+  .res {
+    display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
+    animation: pop .25s ease-out;
+  }
+  .res.ok { background: var(--ok-soft); color: var(--ok-text); }
+  .res.err { background: var(--danger-soft); color: var(--danger-text); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .err-msg {
+    margin-top: 4px; max-width: 260px; font-size: 11.5px; color: var(--danger-text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .icon-wrap { display: inline-flex; }
+  .icon-wrap.spinning { animation: spin 1s linear infinite; }
 </style>

@@ -42,6 +42,7 @@ XFinder/
 - **Gerência de servidores em lote**: selecione vários servidores para sincronizar ou remover de uma vez, com filtros por status e vencimento.
 - **Deduplicação Inteligente**: Normalização de categorias e títulos repetidos.
 - **Limpeza Automática de Expirados (AutoExpire)**: Monitora e expurga servidores vencidos no boot e a cada 15 minutos.
+- **Sincronização diária automática**: todo dia às 03:00 (`DAILY_SYNC_AT`) todas as listas são sincronizadas. As que falharem são tentadas de novo 3 minutos depois e, se falharem outra vez, são apagadas. Se a máquina estiver sem internet, nada é apagado. O painel mostra o andamento, o motivo de cada erro e a hora da última sincronização.
 
 ---
 
@@ -133,6 +134,8 @@ Para abrir e compilar:
 | `HOST`              | `0.0.0.0`                   | Interface de rede (0.0.0.0 para acesso local e Wi-Fi)    |
 | `DATA_DIR`          | `./data`                    | Diretório onde o banco SQLite (`xfinder.db`) é salvo |
 | `WEB_DIR`           | `./web/dist`                | Build do Painel Web (cai para `./web` se não existir)  |
+| `DAILY_SYNC_AT`     | `03:00`                     | Horário da sincronização diária (`HH:MM` ou `off`)      |
+| `TZ`                | fuso do sistema               | Fuso do agendamento (no Docker use `America/Sao_Paulo`)  |
 | `TELEGRAM_API_ID`   | -                             | API ID da aplicação Telegram (my.telegram.org)         |
 | `TELEGRAM_API_HASH` | -                             | API Hash da aplicação Telegram                         |
 | `TELEGRAM_CHANNEL`  | -                             | Canal monitorado (@canal ou link)                        |

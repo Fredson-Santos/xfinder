@@ -15,6 +15,7 @@ type Server struct {
 	MaxConnections    *int    `json:"max_connections,omitempty"`
 	Status            string  `json:"status"` // "pending", "syncing", "ok", "error"
 	LastSync          *int64  `json:"last_sync,omitempty"`
+	LastError         *string `json:"last_error,omitempty"` // motivo da última falha de sincronização
 	CreatedAt         int64   `json:"created_at"`
 	MediaCount        *int64  `json:"media_count,omitempty"` // preenchido apenas em GetServers
 }

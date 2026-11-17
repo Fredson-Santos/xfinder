@@ -22,6 +22,7 @@ import (
 type APIHandler struct {
 	database *db.DB
 	proxy    *proxy.ProxyHandler
+	daily    dailySyncState // sincronização automática diária (scheduler.go)
 }
 
 func NewAPIHandler(database *db.DB, prx *proxy.ProxyHandler) *APIHandler {
@@ -218,7 +219,7 @@ func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, e
 		return "", fmt.Errorf("servidor %d não encontrado", id)
 	}
 
-	a.database.UpdateServerStatus(id, "syncing")
+	a.database.MarkServerSyncing(id)
 
 	var mediaList []models.Media
 	var syncErr error
@@ -286,17 +287,18 @@ func (a *APIHandler) SyncServerInternal(id int64, deleteOnError bool) (string, e
 		if deleteOnError {
 			a.database.DeleteServer(id)
 		} else {
-			a.database.UpdateServerStatus(id, "error")
+			a.database.FinishServerSync(id, "error", syncErr.Error())
 		}
 		return "", syncErr
 	}
 
 	if err := a.database.ReplaceMedia(id, mediaList); err != nil {
-		a.database.UpdateServerStatus(id, "error")
-		return "", fmt.Errorf("falha ao salvar mídia: %w", err)
+		err = fmt.Errorf("falha ao salvar mídia: %w", err)
+		a.database.FinishServerSync(id, "error", err.Error())
+		return "", err
 	}
 
-	a.database.UpdateServerStatus(id, "ok")
+	a.database.FinishServerSync(id, "ok", "")
 	return fmt.Sprintf("Sincronizado com sucesso! %d itens catalogados.", len(mediaList)), nil
 }
 
@@ -332,6 +334,42 @@ type SyncBatchResultItem struct {
 	Message string `json:"message"`
 }
 
+// syncMany sincroniza vários servidores com no máximo `concurrency` em paralelo.
+// onDone (opcional) é chamado ao terminar cada servidor.
+func (a *APIHandler) syncMany(ids []int64, deleteOnError bool, concurrency int, onDone func(SyncBatchResultItem)) []SyncBatchResultItem {
+	sem := make(chan struct{}, concurrency)
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results = make([]SyncBatchResultItem, 0, len(ids))
+	)
+
+	for _, srvID := range ids {
+		wg.Add(1)
+		go func(id int64) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			msg, err := a.SyncServerInternal(id, deleteOnError)
+			item := SyncBatchResultItem{ID: id, Success: err == nil, Message: msg}
+			if err != nil {
+				item.Message = err.Error()
+			}
+
+			mu.Lock()
+			results = append(results, item)
+			mu.Unlock()
+			if onDone != nil {
+				onDone(item)
+			}
+		}(srvID)
+	}
+
+	wg.Wait()
+	return results
+}
+
 // SyncServersBatch sincroniza múltiplos servidores simultaneamente com Goroutines
 func (a *APIHandler) SyncServersBatch(w http.ResponseWriter, r *http.Request) {
 	var req SyncBatchRequest
@@ -355,46 +393,17 @@ func (a *APIHandler) SyncServersBatch(w http.ResponseWriter, r *http.Request) {
 		deleteOnError = false
 	}
 
-	sem := make(chan struct{}, concurrency)
-	var (
-		wg      sync.WaitGroup
-		mu      sync.Mutex
-		results []SyncBatchResultItem
-		success int
-		failed  int
-	)
-
-	for _, srvID := range req.ServerIDs {
-		wg.Add(1)
-		go func(id int64) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			msg, err := a.SyncServerInternal(id, deleteOnError)
-
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				failed++
-				results = append(results, SyncBatchResultItem{
-					ID:      id,
-					Success: false,
-					Message: err.Error(),
-				})
-			} else {
-				success++
-				results = append(results, SyncBatchResultItem{
-					ID:      id,
-					Success: true,
-					Message: msg,
-				})
-			}
-		}(srvID)
-	}
-
-	wg.Wait()
+	results := a.syncMany(req.ServerIDs, deleteOnError, concurrency, nil)
 	a.proxy.InvalidateCache()
+
+	success, failed := 0, 0
+	for _, r := range results {
+		if r.Success {
+			success++
+		} else {
+			failed++
+		}
+	}
 
 	sendJSON(w, http.StatusOK, map[string]interface{}{
 		"total":   len(req.ServerIDs),
@@ -639,6 +648,14 @@ func (a *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/servers/cleanup-expired", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			a.CleanupExpired(w, r)
+			return
+		}
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/sync/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			a.DailySyncStatus(w, r)
 			return
 		}
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
