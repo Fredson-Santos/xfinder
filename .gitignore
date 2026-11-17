@@ -1,6 +1,6 @@
-# Go Binaries & Compilations
-xfinder
-xfinder.exe
+# Go Binaries & Compilations (só na raiz: "xfinder" solto ignorava android-tv/.../br/xfinder)
+/xfinder
+/xfinder.exe
 backend/xfinder
 backend/xfinder.exe
 *.exe
