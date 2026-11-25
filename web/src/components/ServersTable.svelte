@@ -58,7 +58,7 @@
   let someVisibleSelected = $derived(!allVisibleSelected && visible.some((r) => selected.has(r.id)));
 
   // Acompanha sincronizações que não partiram desta aba (agendamento diário,
-  // outra aba, bot do Telegram): enquanto houver alguma, recarrega a cada 4s.
+  // outra aba): enquanto houver alguma, recarrega a cada 4s.
   onMount(() => {
     loadDailyStatus();
     let wasRunning = false;

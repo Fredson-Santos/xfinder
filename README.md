@@ -13,7 +13,7 @@ XFinder/
 ├── backend/
 │   ├── cmd/server/          # Entrypoint do servidor Go (main.go)
 │   ├── internal/            # Núcleo: api, db, m3u, models, proxy, xtream
-│   ├── scripts/             # Scripts de manutenção (*.py) + telegram_bot.py
+│   ├── scripts/             # Scripts de manutenção (*.py)
 │   ├── go.mod / go.sum      # Dependências Go
 │   └── Dockerfile           # Imagem multi-stage Go ultra-enxuta (~25MB)
 ├── android-tv/              # App nativo Android TV (Kotlin, Jetpack Compose, Gradle)
@@ -102,21 +102,7 @@ docker compose up -d --build
 
 ---
 
-### 4. Bot do Telegram (Automação Opcional)
-
-Monitora canais públicos ou privados do Telegram e cadastra listas e contas Xtream automaticamente no XFinder:
-
-```bash
-# Configurar credenciais no .env
-cp .env.example .env
-
-# Executar o bot:
-python backend/scripts/telegram_bot.py
-```
-
----
-
-### 5. App Android TV
+### 4. App Android TV
 
 O projeto em `android-tv/` é um aplicativo nativo para Android TV construído com Kotlin e Jetpack Compose.
 Para abrir e compilar:
@@ -136,10 +122,6 @@ Para abrir e compilar:
 | `WEB_DIR`           | `./web/dist`                | Build do Painel Web (cai para `./web` se não existir)  |
 | `DAILY_SYNC_AT`     | `03:00`                     | Horário da sincronização diária (`HH:MM` ou `off`)      |
 | `TZ`                | fuso do sistema               | Fuso do agendamento (no Docker use `America/Sao_Paulo`)  |
-| `TELEGRAM_API_ID`   | -                             | API ID da aplicação Telegram (my.telegram.org)         |
-| `TELEGRAM_API_HASH` | -                             | API Hash da aplicação Telegram                         |
-| `TELEGRAM_CHANNEL`  | -                             | Canal monitorado (@canal ou link)                        |
-| `XFINDER_API_URL`   | `http://localhost:2332/api` | Endpoint da API do XFinder para importações            |
 
 ---
 
