@@ -45,5 +45,12 @@ export const api = {
       seriesId: seriesId ?? '',
     })}`),
 
+  listProfiles: () => request('GET', '/profiles'),
+  createProfile: (name, avatar) => request('POST', '/profiles', { name, avatar }),
+  updateProfile: (id, name, avatar) => request('PUT', `/profiles/${id}`, { name, avatar }),
+  deleteProfile: (id) => request('DELETE', `/profiles/${id}`),
+  profileData: (id) => request('GET', `/profiles/${id}/data`),
+  pushProfileData: (id, set, del) => request('POST', `/profiles/${id}/data`, { set, del }),
+
   exportUrl: (format) => `/api/servers/export?format=${encodeURIComponent(format)}`,
 };

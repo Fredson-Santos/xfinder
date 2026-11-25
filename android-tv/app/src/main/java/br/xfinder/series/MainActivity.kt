@@ -2,10 +2,12 @@ package br.xfinder.series
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -41,6 +43,7 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -69,6 +72,7 @@ sealed interface Screen {
     }
 
     data object Settings : Screen
+    data object Profiles : Screen
     class Detail(val series: Series) : Screen
 }
 
@@ -93,7 +97,28 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     val stack = remember {
-        mutableStateListOf<Screen>(if (Store.serverUrl == null) Screen.Settings else Screen.Home())
+        // Ao abrir o app sempre aparece "Quem está assistindo?"
+        mutableStateListOf<Screen>(if (Store.serverUrl == null) Screen.Settings else Screen.Profiles)
+    }
+    fun openHome() { stack.clear(); stack.add(Screen.Home()) }
+
+    // Favoritos/histórico gravados em outro aparelho (ex.: web) vêm sem as fontes
+    // de reprodução: busca o título no servidor antes de abrir.
+    val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    var opening by remember { mutableStateOf(false) }
+    fun openItem(item: Series) {
+        if (item.sources.isNotEmpty()) { stack.add(Screen.Detail(item)); return }
+        if (opening) return
+        opening = true
+        scope.launch {
+            val full = withContext(Dispatchers.IO) {
+                runCatching { Repo.search(item.type, item.title).firstOrNull { it.key == item.key } }.getOrNull()
+            }
+            opening = false
+            if (full != null) stack.add(Screen.Detail(full))
+            else Toast.makeText(ctx, "Não foi possível carregar “${item.title}” agora.", Toast.LENGTH_LONG).show()
+        }
     }
     BackHandler(enabled = stack.size > 1) { stack.removeAt(stack.lastIndex) }
     val s = stack.last()
@@ -103,11 +128,13 @@ fun App() {
                 s,
                 onSearch = { type -> stack.add(Screen.Search(type)) },
                 onSettings = { stack.add(Screen.Settings) },
-                onOpen = { stack.add(Screen.Detail(it)) },
+                onOpen = { openItem(it) },
+                onProfiles = { stack.clear(); stack.add(Screen.Profiles) },
             )
-            is Screen.Search -> SearchScreen(s, onOpen = { stack.add(Screen.Detail(it)) })
+            Screen.Profiles -> ProfileScreen(onChosen = ::openHome, onSettings = { stack.add(Screen.Settings) })
+            is Screen.Search -> SearchScreen(s, onOpen = { openItem(it) })
             Screen.Settings -> SettingsScreen(onDone = {
-                if (stack.size > 1) stack.removeAt(stack.lastIndex) else stack[0] = Screen.Home()
+                if (stack.size > 1) stack.removeAt(stack.lastIndex) else stack[0] = Screen.Profiles
             })
             is Screen.Detail -> if (s.series.type == "series") SeriesScreen(s.series) else MediaScreen(s.series)
         }
@@ -128,7 +155,7 @@ fun InitialFocus(fr: FocusRequester, vararg keys: Any?) {
 // ───────────────────────────── Início ─────────────────────────────
 
 @Composable
-fun HomeScreen(state: Screen.Home, onSearch: (String) -> Unit, onSettings: () -> Unit, onOpen: (Series) -> Unit) {
+fun HomeScreen(state: Screen.Home, onSearch: (String) -> Unit, onSettings: () -> Unit, onOpen: (Series) -> Unit, onProfiles: () -> Unit) {
     Store.version.intValue
     val cont = Store.continueList()
     val favs = listOf(
@@ -158,6 +185,11 @@ fun HomeScreen(state: Screen.Home, onSearch: (String) -> Unit, onSettings: () ->
                     PillButton("Canais", focusRequester = fr("nav:live"), onFocus = { state.lastFocus = "nav:live" }) { onSearch("live") }
                     PillButton(null, Ic.Search, focusRequester = fr("nav:search"), onFocus = { state.lastFocus = "nav:search" }) { onSearch("series") }
                     PillButton(null, Ic.Settings, focusRequester = fr("nav:settings"), onFocus = { state.lastFocus = "nav:settings" }, onClick = onSettings)
+                    Store.currentProfile?.let { pr ->
+                        TvFocusable(Modifier.size(46.dp), CircleShape, 1.1f, fr("nav:profile"), { state.lastFocus = "nav:profile" }, onClick = onProfiles) { f ->
+                            ProfileAvatar(pr, 46.dp, Modifier.border(androidx.compose.foundation.BorderStroke(2.dp, if (f) Color.White else Color.Transparent), CircleShape))
+                        }
+                    }
                 }
             }
         }

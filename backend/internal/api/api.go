@@ -751,6 +751,9 @@ func (a *APIHandler) RegisterRoutes(mux *http.ServeMux) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	})
 
+	mux.HandleFunc("/api/profiles", a.handleProfiles)
+	mux.HandleFunc("/api/profiles/", a.handleProfileItem)
+
 	mux.HandleFunc("/api/remux", func(w http.ResponseWriter, r *http.Request) {
 		a.RemuxStream(w, r)
 	})

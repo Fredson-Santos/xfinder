@@ -12,7 +12,7 @@
   import { tick, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { route, navigate, href, back } from '../lib/router.svelte.js';
-  import { findItem } from '../lib/items.js';
+  import { findItem, hydrateItem } from '../lib/items.js';
   import {
     library, isWatched, setWatched, getEpisodeProgress, getSeriesProgress, saveEpisodeProgress,
     isFavorite, toggleFavorite, saveMediaProgress, WATCHED_PCT,
@@ -33,7 +33,10 @@
   let item = $state(null);
   $effect(() => {
     const k = key;
-    item = untrack(() => findItem(k, [library.favorites, library.recents]));
+    const found = untrack(() => findItem(k, [library.favorites, library.recents]));
+    item = found;
+    // item sincronizado de outro aparelho: busca os servidores de reprodução
+    if (found && !found.servers?.length) hydrateItem(found).then((h) => { if (key === k && h !== found) item = h; });
   });
   let providers = $derived(item ? xtreamServers(item) : []);
 

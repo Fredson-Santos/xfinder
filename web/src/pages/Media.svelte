@@ -2,7 +2,7 @@
   /** Filme ou canal ao vivo. URL: #/titulo/<chave>?play=1&src=<índice do servidor> */
   import { untrack } from 'svelte';
   import { route, navigate, href, back } from '../lib/router.svelte.js';
-  import { findItem } from '../lib/items.js';
+  import { findItem, hydrateItem } from '../lib/items.js';
   import { library, isFavorite, toggleFavorite, getMediaProgress, saveMediaProgress, WATCHED_PCT } from '../lib/library.svelte.js';
   import { mediaSources } from '../lib/streams.js';
   import { openPlayer, stopPlayer, player } from '../lib/player.svelte.js';
@@ -19,7 +19,10 @@
   let item = $state(null);
   $effect(() => {
     const k = key;
-    item = untrack(() => findItem(k, [library.favorites, library.recents]));
+    const found = untrack(() => findItem(k, [library.favorites, library.recents]));
+    item = found;
+    // item sincronizado de outro aparelho: busca os servidores de reprodução
+    if (found && !found.servers?.length) hydrateItem(found).then((h) => { if (key === k && h !== found) item = h; });
   });
 
   let isLive = $derived(item?.type === 'live');

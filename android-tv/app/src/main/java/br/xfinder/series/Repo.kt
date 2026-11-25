@@ -2,7 +2,9 @@ package br.xfinder.series
 
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -160,5 +162,38 @@ object Repo {
             pool.shutdownNow()
         }
     }
-}
 
+    // ---- perfis (dados do usuário guardados no servidor) ----
+    private fun send(method: String, path: String, body: JSONObject? = null): String {
+        val rb = body?.toString()?.toRequestBody("application/json".toMediaType())
+        val req = Request.Builder().url("${base()}$path").header("User-Agent", "XFinderSeries/1.0").method(method, rb).build()
+        http.newCall(req).execute().use { r ->
+            val text = r.body?.string().orEmpty()
+            if (!r.isSuccessful) throw RuntimeException("HTTP ${r.code}: ${text.take(120)}")
+            return text
+        }
+    }
+
+    fun profiles(): List<Profile> {
+        val a = JSONArray(send("GET", "/api/profiles"))
+        return (0 until a.length()).map { Profile.fromJson(a.getJSONObject(it)) }
+    }
+
+    fun createProfile(name: String, avatar: String): Profile =
+        Profile.fromJson(JSONObject(send("POST", "/api/profiles", JSONObject().put("name", name).put("avatar", avatar))))
+
+    fun updateProfile(id: Long, name: String, avatar: String) {
+        send("PUT", "/api/profiles/$id", JSONObject().put("name", name).put("avatar", avatar))
+    }
+
+    fun deleteProfile(id: Long) { send("DELETE", "/api/profiles/$id") }
+
+    fun profileData(id: Long): Map<String, String> {
+        val o = JSONObject(send("GET", "/api/profiles/$id/data"))
+        return o.keys().asSequence().associateWith { o.getString(it) }
+    }
+
+    fun pushProfileData(id: Long, set: Map<String, String>, del: Collection<String>) {
+        send("POST", "/api/profiles/$id/data", JSONObject().put("set", JSONObject(set)).put("del", JSONArray(del)))
+    }
+}

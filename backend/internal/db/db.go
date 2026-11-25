@@ -103,6 +103,9 @@ func (d *DB) initSchema() error {
 	if _, err := d.conn.Exec(schema); err != nil {
 		return err
 	}
+	if _, err := d.conn.Exec(profileSchema); err != nil {
+		return err
+	}
 
 	// Migração: motivo da última falha de sincronização
 	var hasLastError int

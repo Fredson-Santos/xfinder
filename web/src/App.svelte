@@ -11,6 +11,8 @@
   import Player from './components/Player.svelte';
   import Icon from './components/Icon.svelte';
   import SearchBar from './components/SearchBar.svelte';
+  import ProfilePicker from './components/ProfilePicker.svelte';
+  import { profiles, avatarGradient, leaveProfile, loadProfiles } from './lib/profiles.svelte.js';
 
   let page = $derived.by(() => {
     const p = route.path;
@@ -34,19 +36,29 @@
     if (req && (!playing || req.ownerPath !== path)) stopPlayer();
   });
 
-  onMount(loadServers);
+  onMount(() => { loadServers(); loadProfiles(); });
 </script>
 
+{#if !profiles.current}
+  <ProfilePicker />
+{:else}
 <header class="topbar">
   <div class="container topbar-inner">
     <a class="logo" href="#/" onclick={(e) => { e.preventDefault(); navigate('/'); }}>
       <span class="logo-dot"></span><span class="logo-text">XFinder</span>
     </a>
     <div class="search"><SearchBar /></div>
-    <button class="gear" class:on={page.name === 'settings'} onclick={() => navigate('/config/servidores')}
-            aria-label="Configurações" title="Configurações">
-      <Icon name="gear" size={20} />
-    </button>
+    <div class="actions">
+      <button class="gear" class:on={page.name === 'settings'} onclick={() => navigate('/config/servidores')}
+              aria-label="Configurações" title="Configurações">
+        <Icon name="gear" size={20} />
+      </button>
+      <button class="me" onclick={leaveProfile} aria-label="Trocar de perfil ({profiles.current.name})"
+              title="Trocar de perfil ({profiles.current.name})"
+              style="background: {avatarGradient(profiles.current.avatar)}">
+        {profiles.current.name.trim().slice(0, 1).toUpperCase()}
+      </button>
+    </div>
   </div>
 </header>
 
@@ -62,6 +74,8 @@
 
 <Player />
 
+{/if}
+
 {#if toastState.message}
   {#key toastState.id}
     <div class="toast" role="status">{toastState.message}</div>
@@ -76,7 +90,12 @@
     align-items: center; gap: 16px; height: 64px;
   }
   .search { min-width: 0; }
-  .gear { justify-self: end; }
+  .actions { justify-self: end; display: flex; align-items: center; gap: 8px; }
+  .me {
+    width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent;
+    color: #fff; font-size: 15px; font-weight: 700;
+  }
+  .me:hover { border-color: var(--text); }
   @media (max-width: 640px) {
     .topbar-inner { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
     .logo-text { display: none; }
