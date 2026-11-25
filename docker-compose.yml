@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     image: xfinder:latest
-    container_name: xfinder
     environment:
       - PORT=2332
       - HOST=0.0.0.0
@@ -17,5 +16,7 @@ services:
     ports:
       - "2332:2332"
     volumes:
-      - ./data:/app/data
+      # XFINDER_DATA: pasta do banco no host. No Dokploy, aponte para uma pasta fixa
+      # (o clone do código é refeito a cada deploy); local, o padrão é ./data.
+      - ${XFINDER_DATA:-./data}:/app/data
     restart: unless-stopped
